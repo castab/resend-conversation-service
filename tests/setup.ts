@@ -15,6 +15,8 @@ export const TEST_CONFIG = {
   appBaseUrl: process.env.APP_BASE_URL || 'http://localhost:3000',
   conversationApiKey:
     process.env.CONVERSATION_API_KEY || 'test-conversation-api-key',
+  conversationV2ApiKey:
+    process.env.CONVERSATION_V2_API_KEY || 'test-conversation-v2-api-key',
   outboxDrainApiKey:
     process.env.OUTBOX_DRAIN_API_KEY || 'test-outbox-drain-api-key',
   resendApiBaseUrl: process.env.RESEND_API_BASE_URL || 'http://localhost:4010',

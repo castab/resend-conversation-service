@@ -8,12 +8,36 @@ import {
   MAX_SUBJECT_LENGTH,
   MAX_TITLE_LENGTH,
 } from './api';
+import { isValidReplyToBaseAddress } from './email';
+
+export type EmailIdentityInput = {
+  address: string;
+  name: string | null;
+};
 
 export type CreateConversationInput = {
   topic: { type: string; externalId: string; title: string };
   participant: { email: string; name: string | null };
   subject?: string;
   message: { text?: string; html?: string; replyToName?: string };
+};
+
+export type CreateConversationV2Input = Omit<
+  CreateConversationInput,
+  'message'
+> & {
+  message: Omit<CreateConversationInput['message'], 'replyToName'> & {
+    from: EmailIdentityInput;
+    replyTo: EmailIdentityInput;
+  };
+};
+
+export type MessageV2Input = {
+  text?: string;
+  html?: string;
+  replyToMessageId?: string;
+  from: EmailIdentityInput;
+  replyTo: EmailIdentityInput;
 };
 
 function normalizeReplyToName(value: unknown): string | null | undefined {
@@ -162,6 +186,116 @@ export function validateMessageBody(value: unknown):
         ? { replyToMessageId: value.replyToMessageId }
         : {}),
       ...(replyToName ? { replyToName } : {}),
+    },
+  };
+}
+
+function normalizeEmailIdentity(
+  value: unknown,
+  field: string,
+  replyTo: boolean,
+): { value: EmailIdentityInput } | { error: string } {
+  if (!isRecord(value) || typeof value.address !== 'string') {
+    return { error: `${field}.address must be a valid email address` };
+  }
+  const address = value.address.trim().toLowerCase();
+  if (
+    !isEmailAddress(address) ||
+    (replyTo && !isValidReplyToBaseAddress(address))
+  ) {
+    return {
+      error: replyTo
+        ? `${field}.address must be an untagged Reply-To base address`
+        : `${field}.address must be a valid email address`,
+    };
+  }
+  if (
+    value.name !== undefined &&
+    value.name !== null &&
+    (!isHeaderSafeText(value.name, MAX_NAME_LENGTH) || /[<>]/.test(value.name))
+  ) {
+    return {
+      error: `${field}.name must be a header-safe string of at most 256 characters`,
+    };
+  }
+  const name = typeof value.name === 'string' ? value.name.trim() : '';
+  return { value: { address, name: name || null } };
+}
+
+export function validateCreateV2Body(
+  value: unknown,
+): { value: CreateConversationV2Input } | { error: string } {
+  const base = validateCreateBody(value);
+  if ('error' in base) {
+    return base;
+  }
+  if (!isRecord(value) || !isRecord(value.message)) {
+    return { error: 'message is required' };
+  }
+  if (value.message.replyToName !== undefined) {
+    return { error: 'message.replyToName is not supported in API v2' };
+  }
+  const from = normalizeEmailIdentity(
+    value.message.from,
+    'message.from',
+    false,
+  );
+  if ('error' in from) {
+    return from;
+  }
+  const replyTo = normalizeEmailIdentity(
+    value.message.replyTo,
+    'message.replyTo',
+    true,
+  );
+  if ('error' in replyTo) {
+    return replyTo;
+  }
+  return {
+    value: {
+      topic: base.value.topic,
+      participant: base.value.participant,
+      ...(base.value.subject ? { subject: base.value.subject } : {}),
+      message: {
+        ...(base.value.message.text ? { text: base.value.message.text } : {}),
+        ...(base.value.message.html ? { html: base.value.message.html } : {}),
+        from: from.value,
+        replyTo: replyTo.value,
+      },
+    },
+  };
+}
+
+export function validateMessageV2Body(
+  value: unknown,
+): { value: MessageV2Input } | { error: string } {
+  const base = validateMessageBody(value);
+  if ('error' in base) {
+    return base;
+  }
+  if (!isRecord(value)) {
+    return { error: 'Request body must be an object' };
+  }
+  if (value.replyToName !== undefined) {
+    return { error: 'replyToName is not supported in API v2' };
+  }
+  const from = normalizeEmailIdentity(value.from, 'from', false);
+  if ('error' in from) {
+    return from;
+  }
+  const replyTo = normalizeEmailIdentity(value.replyTo, 'replyTo', true);
+  if ('error' in replyTo) {
+    return replyTo;
+  }
+  return {
+    value: {
+      ...(base.value.text ? { text: base.value.text } : {}),
+      ...(base.value.html ? { html: base.value.html } : {}),
+      ...(base.value.replyToMessageId
+        ? { replyToMessageId: base.value.replyToMessageId }
+        : {}),
+      from: from.value,
+      replyTo: replyTo.value,
     },
   };
 }

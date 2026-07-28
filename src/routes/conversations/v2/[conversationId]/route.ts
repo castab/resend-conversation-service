@@ -1,5 +1,5 @@
 import {
-  authorize,
+  authorizeV2,
   getConversationResponse,
   isHeaderSafeText,
   isRecord,
@@ -13,7 +13,7 @@ export async function GET(
   request: Request,
   context: { params: Promise<{ conversationId: string }> },
 ) {
-  const unauthorized = authorize(request);
+  const unauthorized = authorizeV2(request);
   if (unauthorized) {
     return unauthorized;
   }
@@ -29,7 +29,7 @@ export async function PATCH(
   request: Request,
   context: { params: Promise<{ conversationId: string }> },
 ) {
-  const unauthorized = authorize(request);
+  const unauthorized = authorizeV2(request);
   if (unauthorized) {
     return unauthorized;
   }
@@ -41,14 +41,12 @@ export async function PATCH(
   if ('error' in topic) {
     return Response.json({ error: topic.error }, { status: 400 });
   }
-
   const { conversationId: rawConversationId } = await context.params;
   if (!isUuid(rawConversationId)) {
     return Response.json({ error: 'Invalid conversation ID' }, { status: 400 });
   }
   const conversationId = rawConversationId.toLowerCase();
   const client = getPrismaClient();
-
   try {
     const assigned = await client.$transaction(async (transaction) => {
       await transaction.$queryRaw`
@@ -59,10 +57,10 @@ export async function PATCH(
           id: conversationId,
           topicType: null,
           externalTopicId: null,
-          OR: [{ apiVersion: null }, { apiVersion: 'V1' }],
+          OR: [{ apiVersion: null }, { apiVersion: 'V2' }],
         },
         data: {
-          apiVersion: 'V1',
+          apiVersion: 'V2',
           topicType: topic.value.type,
           externalTopicId: topic.value.externalId,
           title: topic.value.title,
@@ -76,9 +74,7 @@ export async function PATCH(
       return Response.json(
         {
           error: existing
-            ? existing.apiVersion === 'V2'
-              ? 'Conversation requires API v2'
-              : 'Conversation is already assigned to a topic'
+            ? 'Conversation is already assigned to a topic'
             : 'Conversation not found',
         },
         { status: existing ? 409 : 404 },

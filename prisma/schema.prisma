@@ -30,23 +30,60 @@ enum EmailDeliveryState {
   FAILED
 }
 
+enum EmailApiVersion {
+  V1
+  V2
+}
+
+enum EmailAddressRole {
+  FROM
+  REPLY_TO
+}
+
 model EmailConversation {
-  id                 String         @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  routingToken       String         @unique(map: "email_conversations_routing_token_key") @default(dbgenerated("gen_random_uuid()")) @map("routing_token") @db.Uuid
-  topicType          String?        @map("topic_type") @db.VarChar(64)
-  externalTopicId    String?        @map("external_topic_id") @db.VarChar(255)
-  title              String
-  subject            String
-  participantAddress String         @map("participant_address")
-  participantName    String?        @map("participant_name")
-  lastMessageAt      DateTime       @map("last_message_at") @db.Timestamptz(6)
-  createdAt          DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt          DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
-  messages           EmailMessage[]
+  id                       String           @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  routingToken             String           @unique(map: "email_conversations_routing_token_key") @default(dbgenerated("gen_random_uuid()")) @map("routing_token") @db.Uuid
+  apiVersion               EmailApiVersion? @map("api_version")
+  topicType                String?          @map("topic_type") @db.VarChar(64)
+  externalTopicId          String?          @map("external_topic_id") @db.VarChar(255)
+  title                    String
+  subject                  String
+  participantAddress       String           @map("participant_address")
+  participantName          String?          @map("participant_name")
+  replyToBaseAddress       String?          @map("reply_to_base_address") @db.VarChar(320)
+  replyToRequiresAllowlist Boolean          @default(false) @map("reply_to_requires_allowlist")
+  lastMessageAt            DateTime         @map("last_message_at") @db.Timestamptz(6)
+  createdAt                DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+  messages                 EmailMessage[]
+  routingAliases           EmailConversationRoutingAlias[]
 
   @@unique([topicType, externalTopicId], map: "email_conversations_topic_key")
   @@index([lastMessageAt], map: "idx_email_conversations_last_message_at")
   @@map("email_conversations")
+}
+
+model EmailConversationRoutingAlias {
+  id             String            @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  conversationId String            @map("conversation_id") @db.Uuid
+  routingToken   String            @map("routing_token") @db.Uuid
+  baseAddress    String            @map("base_address") @db.VarChar(320)
+  createdAt      DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  conversation   EmailConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([routingToken, baseAddress], map: "email_conversation_routing_aliases_token_base_key")
+  @@index([conversationId], map: "idx_email_conversation_routing_aliases_conversation")
+  @@map("email_conversation_routing_aliases")
+}
+
+model EmailAddressAllowlistEntry {
+  id        String           @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  address   String           @db.VarChar(320)
+  role      EmailAddressRole
+  createdAt DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([address, role], map: "email_address_allowlist_entries_address_role_key")
+  @@map("email_address_allowlist_entries")
 }
 
 model EmailMessage {

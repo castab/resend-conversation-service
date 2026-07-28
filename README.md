@@ -18,8 +18,9 @@ Resend
 
 Authorized callers
   -> API gateway or private service address
-  -> /api/conversations/v1
-  -> bearer authentication
+  -> /api/conversations/v1 (frozen legacy contract)
+     or /api/conversations/v2 (forward contract)
+  -> version-specific bearer authentication
   -> synchronous Resend send or transactional outbox
   -> PostgreSQL conversation projection
 ```
@@ -55,26 +56,60 @@ PATCH /api/conversations/v1/{conversationId}
 POST  /api/conversations/v1/{conversationId}/messages
 POST  /api/conversations/v1/{conversationId}/messages/outbox
 GET   /api/conversations/v1/topics/{topicType}/{externalTopicId}
+POST  /api/conversations/v2
+GET   /api/conversations/v2?assignment=unassigned
+POST  /api/conversations/v2/outbox
+POST  /api/conversations/v2/outbox/drain
+GET   /api/conversations/v2/{conversationId}
+PATCH /api/conversations/v2/{conversationId}
+POST  /api/conversations/v2/{conversationId}/messages
+POST  /api/conversations/v2/{conversationId}/messages/outbox
+GET   /api/conversations/v2/topics/{topicType}/{externalTopicId}
 GET   /docs
 GET   /openapi.json
 ```
 
 The webhook requires a valid signature over the exact raw body and all three
-Svix headers. Conversation operations require `CONVERSATION_API_KEY`. The
-outbox drain uses the separate `OUTBOX_DRAIN_API_KEY`. Sending and enqueueing
+Svix headers. V1 conversation operations require `CONVERSATION_API_KEY`; V2
+conversation operations require the separate `CONVERSATION_V2_API_KEY`. Both
+outbox drain routes use `OUTBOX_DRAIN_API_KEY`. Sending and enqueueing
 operations also require `Idempotency-Key`.
 
 The former `/api/webhooks/v1/resend` path remains intentionally unavailable.
 
+### API versions
+
+V1 is the frozen legacy API. Its outbound From and Reply-To identities come
+only from `RESEND_FROM` and `RESEND_REPLY_TO`; callers may supply a Reply-To
+display name but cannot select either mailbox address. V1 has no planned sunset
+and remains available for existing integrations and V1 conversations, but new
+identity-selection behavior belongs in V2.
+
+V2 is the forward API. Every create, reply, and corresponding outbox request
+must provide structured `from` and `replyTo` objects with an `address` and an
+optional `name`. Both addresses are canonicalized to lowercase and must match
+separate, role-specific database allowlist entries before new send intent is
+persisted. Display names are validated header text, not allowlisted identities.
+
+A V2 reply promotes a V1 conversation when the V2 send intent is successfully
+persisted, before any synchronous provider call. Promotion therefore remains
+committed even if that provider call subsequently returns `502`; provider
+acceptance is not required. The supplied Reply-To base must match the base
+already fixed on the conversation. Promotion is one-way: later V1 reply and
+assignment writes return `409` with `Conversation requires API v2`; reads remain
+available through both versions.
+
 ## Conversation Model
 
 A caller-owned `(topicType, externalTopicId)` pair identifies a conversation.
-Each conversation currently has one external participant and one configured
-sender mailbox. Each conversation has an opaque routing token and a stable
-Reply-To address under the configured receiving mailbox. Each outbound message
-may add its own Reply-To display name while preserving that generated address.
-Messages retain provider and RFC identifiers, ordered reply ancestry, send
-state, projected outbound delivery state, content, and timestamps.
+Each conversation currently has one external participant. V1 uses the
+environment-configured sender and Reply-To base; V2 records the selected sender
+on each message and fixes the selected Reply-To base on the conversation. Each
+conversation also has an opaque routing token. Outbound Reply-To addresses are
+always generated from the fixed base as `<local>+c_<token>@<domain>`, and each
+message may add a display name without changing that address. Messages retain
+provider and RFC identifiers, ordered reply ancestry, send state, projected
+outbound delivery state, content, and timestamps.
 
 Asynchronous sends persist the same pending message rows used by synchronous
 sends. Outbox rows coordinate fixed, ordered Resend batches and bounded retries
@@ -82,7 +117,10 @@ without duplicating message content. Inbound messages are attached through RFC
 headers, including repair when children arrive before their parent. If eligible
 RFC ancestry does not resolve a conversation, the service falls back to the
 conversation token in a `to` or `received_for` address. Token routing still
-requires the inbound sender to match the conversation participant.
+requires the inbound sender to match the conversation participant. When
+out-of-order rows are reconciled into one conversation, the merge preserves
+one-way V2 promotion and historical routing-token/base aliases so replies sent
+to earlier generated addresses can still resolve.
 
 Outbound `accepted` state means Resend accepted the send API request. A message
 is only marked delivered after a matching `email.delivered` webhook is projected.
@@ -111,18 +149,58 @@ RESEND_WEBHOOK_SECRET=whsec_xxxxxxxxx
 RESEND_FROM=Mailbox <mailbox@example.com>
 RESEND_REPLY_TO=mailbox@replies.example.com
 CONVERSATION_API_KEY=replace-with-a-long-random-secret
+CONVERSATION_V2_API_KEY=replace-with-a-different-long-random-secret
 OUTBOX_DRAIN_API_KEY=replace-with-another-long-random-secret
 ```
 
-`RESEND_REPLY_TO` must be a plain mailbox on a Resend Receiving domain, without
-a display name or existing `+` tag. Resend must accept every generated
-`mailbox+c_<token>@domain` address. Keep this value stable while previously sent
-messages can still receive replies. API callers can provide per-message
-Reply-To display names, which are formatted only in outbound provider requests.
-`RESEND_API_BASE_URL` is optional and
-intended for a Resend-compatible test endpoint. The health route requires every
-variable above and database access; it returns `503` if any application
-capability is not configured.
+`RESEND_FROM`, `RESEND_REPLY_TO`, and `CONVERSATION_API_KEY` define the frozen
+V1 identity and credential. V2 callers use `CONVERSATION_V2_API_KEY` and select
+only database-allowlisted identities in each request.
+
+Every Reply-To base, whether supplied by V1 configuration or a V2 caller, must
+be a plain mailbox on a Resend Receiving domain, without a display name or an
+existing `+` tag. Resend must accept every generated
+`mailbox+c_<token>@domain` address. Keep a conversation's base stable while its
+messages can still receive replies.
+
+`RESEND_API_BASE_URL` is optional and intended for a Resend-compatible test
+endpoint. The health route requires every variable above and database access;
+it returns `503` if any application capability is not configured.
+
+### V2 identity allowlist
+
+There is intentionally no allowlist management API. Administrators manage
+`email_address_allowlist_entries` directly in PostgreSQL. Addresses must be
+trimmed canonical lowercase values and matching is exact for both address and
+role. Domain wildcards are not supported. Display names are not allowlisted;
+distinct mailbox aliases are distinct addresses and each alias must have its
+own row.
+
+Allow a From address and a Reply-To base:
+
+```sql
+INSERT INTO email_address_allowlist_entries (address, role)
+VALUES
+  ('booking@example.com', 'FROM'::"EmailAddressRole"),
+  ('booking-replies@replies.example.com', 'REPLY_TO'::"EmailAddressRole")
+ON CONFLICT (address, role) DO NOTHING;
+```
+
+Revoke either role with an exact delete:
+
+```sql
+DELETE FROM email_address_allowlist_entries
+WHERE address = 'booking@example.com'
+  AND role = 'FROM'::"EmailAddressRole";
+
+DELETE FROM email_address_allowlist_entries
+WHERE address = 'booking-replies@replies.example.com'
+  AND role = 'REPLY_TO'::"EmailAddressRole";
+```
+
+Revocation blocks new V2 send or enqueue intent that requests the address. It
+does not cancel or alter an outbox message already persisted after a successful
+allowlist check; the drain sends that frozen payload.
 
 Prisma CLI commands load `.env` through `prisma.config.ts`. Values stored only
 in `.env.local` are not available to Prisma.
@@ -175,6 +253,7 @@ RESEND_API_BASE_URL=http://localhost:4010
 RESEND_FROM=Test Mailbox <mailbox@example.com>
 RESEND_REPLY_TO=mailbox@replies.example.com
 CONVERSATION_API_KEY=test-conversation-api-key
+CONVERSATION_V2_API_KEY=test-conversation-v2-api-key
 OUTBOX_DRAIN_API_KEY=test-outbox-drain-api-key
 APP_BASE_URL=http://localhost:3000
 ```
@@ -210,9 +289,9 @@ Published releases are also available on Docker Hub as
 `castab/resend-service`.
 
 ```bash
-docker pull castab/resend-service:0.1.0
-docker run --rm -e DATABASE_URL="$DATABASE_URL" castab/resend-service:0.1.0 npm run db:migrate:deploy
-docker run --rm -p 3000:3000 --env-file .env castab/resend-service:0.1.0
+docker pull castab/resend-service:0.3.0
+docker run --rm -e DATABASE_URL="$DATABASE_URL" castab/resend-service:0.3.0 npm run db:migrate:deploy
+docker run --rm -p 3000:3000 --env-file .env castab/resend-service:0.3.0
 ```
 
 Stable releases publish one immutable exact tag, plus moving convenience tags:
@@ -247,9 +326,10 @@ authentication enabled even when conversation routes are gateway-restricted.
 Configure Resend to deliver signed events to
 `https://<webhook-host>/api/webhooks/resend/v1`.
 
-Invoke `POST /api/conversations/v1/outbox/drain` at least once per minute when
-using asynchronous sends. Each request handles one bounded batch and does not
-poll internally.
+Invoke either versioned `POST /api/conversations/{version}/outbox/drain` route at
+least once per minute when using asynchronous sends. Both routes use the same
+persisted outbox and drain credential; each request handles one bounded batch
+and does not poll internally.
 
 ## Verification
 

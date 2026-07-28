@@ -1,97 +1,122 @@
 # API Agent Handoff
 
-## Authoritative files
+Contract version: `0.3.0`
 
-- OpenAPI contract published by this service
-- Consumer integration guide published by this service
-- Release notes and versioned Docker image tags published by this service
+## Sources
 
-If you are reading this from a consumer repository, treat the upstream
-`openapi.json`, consumer guide, and release notes from `resend-service` as the
-source of truth. Do not assume local repo scripts, commands, or agent skills
-exist unless your repository defines them separately.
+Use the upstream `openapi.json`, consumer guide, release notes, and versioned service artifact as the integration sources of truth. This handoff is portable and assumes no access to the service repository, its scripts, or local agent configuration.
 
-## Service purpose
+## Version selection
 
-This service is the source of truth for topic-centered email conversations, outbound send intent/state, inbound Resend email projection, outbound delivery-state projection from Resend lifecycle webhooks, and RFC threading ancestry. It is not a general contact or engagement analytics API.
+- Build new conversation integrations against `/api/conversations/v2`.
+- Treat `/api/conversations/v1` as deprecated and frozen. It has no announced sunset.
+- V1 uses server-configured `RESEND_FROM` and `RESEND_REPLY_TO`; callers cannot select identities.
+- V2 requires explicit structured identities on every send and enqueue request.
 
-## Primary workflows
+## Authentication
 
-1. Start a synchronous conversation with `POST /api/conversations/v1`
-2. Send a synchronous reply with `POST /api/conversations/v1/{conversationId}/messages`
-3. Enqueue opening messages or replies through the outbox endpoints
-4. Drain queued messages with `POST /api/conversations/v1/outbox/drain`
-5. Read conversations by service ID or by external topic
-6. List and assign unassigned inbound conversations
-7. Receive signed Resend webhooks at `POST /api/webhooks/resend/v1`
+| Scope | Credential |
+| --- | --- |
+| Conversation V2 | `Authorization: Bearer <CONVERSATION_V2_API_KEY>` |
+| Deprecated conversation V1 | `Authorization: Bearer <CONVERSATION_API_KEY>` |
+| Either outbox drain path | `Authorization: Bearer <OUTBOX_DRAIN_API_KEY>` |
+| Resend webhook | Exact-body `svix-id`, `svix-timestamp`, `svix-signature` |
 
-## Authentication summary
+Credentials are not interchangeable and are never browser-safe.
 
-- Conversation API: `Authorization: Bearer <CONVERSATION_API_KEY>`
-- Outbox drain only: `Authorization: Bearer <OUTBOX_DRAIN_API_KEY>`
-- Webhooks: `svix-id`, `svix-timestamp`, `svix-signature`
-- No browser-safe auth mode exists.
+## V2 request rules
 
-## Most important constraints
+For opening send/enqueue operations, put identities under `message`:
 
-1. One conversation is authoritative for one `(topicType, externalTopicId)` pair.
-2. Topic assignment is one-time only.
-3. A topic conversation can reopen only when every existing message is `failed`.
-4. Every send/enqueue request must include `Idempotency-Key`.
-5. Idempotency keys are retained indefinitely and are globally unique across synchronous and outbox modes.
-6. Idempotency compares normalized validated fields, not literal JSON bodies.
-7. Replies require a parent message in the same conversation and the service will not send a reply without an RFC parent `Message-ID`.
-8. The caller cannot choose the sender mailbox; the service always uses configured `RESEND_FROM`.
-9. Outbound messages use a service-generated conversation address based on `RESEND_REPLY_TO`; callers cannot set the address but may set an optional per-message `replyToName` display name.
-10. Eligible RFC ancestry wins over address-token routing. Tokens are used only as a fallback and still require the conversation participant's sender address.
-11. Returned HTML is untrusted and must be sanitized before rendering.
-12. `accepted` means provider API acceptance, not final delivery.
-13. `deliveryState: "delivered"` means a matching Resend `email.delivered` webhook was projected.
-14. `email.opened` and `email.clicked` are ingested when configured but are not delivery confirmations.
-15. `403` does not occur in the current implementation; invalid scoped credentials return `401`.
-16. Drain responses can report failure or retry work with `200`, but current batch finalization is normally uniform across all items in one response.
+```json
+{
+  "message": {
+    "text": "Opening message",
+    "from": { "address": "booking@mail.example.com", "name": "Booking Team" },
+    "replyTo": { "address": "booking-replies@mail.example.com", "name": "Booking Team" }
+  }
+}
+```
 
-## Retry and idempotency rules
+For existing-conversation send/enqueue operations, put `from` and `replyTo` at the request top level. `address` is required and `name` is optional. Do not send V1 `replyToName` fields to V2.
 
-- Reuse the same `Idempotency-Key` when retrying the same logical send.
-- Do not automatically retry a `502` with a new key.
-- Drain is safe to invoke repeatedly; server-side batching and provider idempotency handle duplicates.
-- Webhook deliveries are at-least-once; duplicates are expected.
-- `503` on reply send/enqueue means parent threading metadata retrieval failed; retry later.
-- Observed outbox retry cadence is 1 minute, 2 minutes, then 5 minutes, with a 23-hour provider idempotency safety window.
+Addresses containing whitespace are invalid; accepted addresses are normalized to lowercase. The database must contain an exact `(address, FROM)` row for `from.address` and an exact `(address, REPLY_TO)` row for `replyTo.address`. Roles are not interchangeable; wildcard, domain, alias, and display-name authorization do not exist. Allowlist administration is database-only.
 
-## Consumer integration checklist
+Identity denial and fixed Reply-To base mismatch both return generic `400`:
 
-When copying this handoff into another service, validate your own integration
-against the upstream contract and your target environment.
+```json
+{"error":"The requested email identity is not allowed. Contact the administrator."}
+```
 
-1. Store the correct base URL and bearer credential for the environment.
-2. Keep a stable `Idempotency-Key` for each logical send or enqueue attempt.
-3. Confirm your request shapes still match the latest upstream OpenAPI contract.
-4. Exercise the workflows you use in a non-production environment: create, reply, queue, drain, and fetch afterward as applicable.
-5. Sanitize returned HTML before rendering it anywhere user-visible.
-6. Diff upstream contract and release-note changes before upgrading versions.
+Do not infer which policy check failed.
 
-## Known unresolved issues
+## Primary routes
 
-- External gateway exposure rules are not published with the service contract.
-- Runtime request handling is more permissive than the contract in some places,
-  especially query `limit` parsing. Consumers should follow the strict OpenAPI
-  schema and send integer limits from `1` through `100`.
-- Unknown request object properties are allowed by both the contract and the
-  implementation, and they do not affect idempotency comparison.
-- Topic lookup does not enforce the documented `externalTopicId` max length,
-  although create and assignment operations do.
-- Webhook runtime validation is prefix-based rather than full schema
-  validation; only the documented Resend event enums are supported public
-  contract.
-- Some uncaught infrastructure failures may not return the documented JSON
-  error body.
-- No formal deprecation or compatibility policy exists beyond `v1` routing.
+V2 mirrors the complete V1 conversation layout:
 
-See the upstream consumer guide for workflow details, error semantics,
-environment setup, and examples.
+| Method | V2 path | Purpose |
+| --- | --- | --- |
+| `POST`, `GET` | `/api/conversations/v2` | Create/send; list unassigned with `assignment=unassigned` |
+| `POST` | `/api/conversations/v2/outbox` | Enqueue opening message; pending idempotent replay also returns `202` |
+| `POST` | `/api/conversations/v2/outbox/drain` | Drain shared outbox with dedicated credential |
+| `GET`, `PATCH` | `/api/conversations/v2/{conversationId}` | Read; assign an unassigned null-version or already-V2 conversation |
+| `POST` | `/api/conversations/v2/{conversationId}/messages` | Send reply |
+| `POST` | `/api/conversations/v2/{conversationId}/messages/outbox` | Enqueue reply; pending idempotent replay also returns `202` |
+| `GET` | `/api/conversations/v2/topics/{topicType}/{externalTopicId}` | Read by topic |
 
-## Transport implementation
+`GET /api/health/v1` is unauthenticated. `POST /api/webhooks/resend/v1` is Svix-authenticated.
 
-The API is served by Express 5. Route behavior lives under `src/routes`, while route ordering, request-body policy, local Swagger assets, and terminal JSON errors are configured in `src/server.ts`.
+## Critical invariants
+
+1. One conversation exists per `(topicType, externalTopicId)` and has one external participant.
+2. Every send/enqueue operation requires a stable `Idempotency-Key` of at most 256 characters.
+3. Keys are retained indefinitely and globally unique across versions and send modes.
+4. The first outbound intent fixes the Reply-To base. The service appends and preserves `+c_<32 lowercase hex routing token>`.
+5. Later V2 requests must submit that same untagged base even when another base is allowlisted.
+6. Allowlist revocation blocks new intent but does not mutate or block already-persisted outbox intent.
+7. Replies require a parent in the same conversation and never send without a parent RFC `Message-ID`.
+8. `References` preserves the selected parent's ancestry.
+9. Returned HTML is untrusted.
+10. `accepted` is provider API acceptance, not final delivery; use projected `deliveryState` for lifecycle status.
+11. Out-of-order row reconciliation preserves one-way V2 promotion and historical routing-token/base aliases when conversations merge.
+
+## Promotion
+
+- Successfully persisting a synchronous or queued V2 reply intent promotes a V1 conversation to V2 before any provider call; provider acceptance is not required, and a subsequent `502` does not roll it back.
+- V2 reopening of an all-failed V1 topic promotes it when the fixed Reply-To base is compatible and the new intent is persisted, even if a later synchronous provider call returns `502`.
+- V2 assignment accepts an unassigned null-version or already-V2 conversation and persists it as V2; it does not accept V1.
+- Reads never promote or demote.
+- After promotion, new V1 reply and enqueue-reply intents plus V1 assignment return `409 Conversation requires API v2`; existing idempotent intent replay can still return stored state.
+- A new V1 opening intent cannot reopen an all-failed V2 conversation.
+- Promotion is one-way.
+
+## Retry rules
+
+- Reuse the same idempotency key and normalized request for the same logical action.
+- Treat `202` from an outbox idempotent replay as stored intent that is still pending.
+- Never retry a `502` with a new key until stored state is reconciled.
+- Retry `503` parent-metadata failures later with backoff.
+- Drain is repeatable and uses persisted ordered batches plus provider idempotency.
+- Webhooks are at-least-once; completed duplicate `svix-id` deliveries return `200`.
+- A replay of already-persisted V2 intent can return stored state after allowlist revocation; revocation applies to new intent.
+- Send all JSON mutations and webhooks as uncompressed JSON. Controlled transport failures are `413` for a body over 2100 KB and `415` for a compressed body; fix the request rather than retrying it unchanged.
+
+## Integration checklist
+
+1. Select V2 and store the V2 credential separately from V1 and drain credentials.
+2. Provision exact lowercase `FROM` and `REPLY_TO` allowlist rows before sending.
+3. Keep the base `replyTo.address` stable for every conversation; never send the generated tagged address back as input.
+4. Persist one idempotency key per logical send or enqueue and reuse it on retries.
+5. Handle `200`, `201`, and `202` as state-bearing success responses.
+6. Reconcile `502` using the same key or a conversation GET.
+7. Sanitize response HTML.
+8. Validate request and response models against upstream OpenAPI contract `0.3.0`.
+
+## Known concerns
+
+- Runtime GET `limit` parsing is more lenient than the contract. Send integers from 1 through 100.
+- Topic lookup is more lenient than create/assignment for `externalTopicId` length. Keep it at 255 characters or fewer.
+- Some uncaught infrastructure failures may not return the standard JSON error envelope.
+- No formal client timeout, request correlation ID, or gateway exposure contract is published.
+- Health readiness requires both V1 and V2 credentials.
+- Dedicated tests cover central V2 identity, promotion, revocation, and routing behavior; not every mirrored read/mutation route has a separate V2 integration case.

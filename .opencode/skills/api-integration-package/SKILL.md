@@ -30,14 +30,17 @@ Inspect these first:
 - `public/openapi.json`
 - `docs/api-consumer-guide.md`
 - `docs/api-agent-handoff.md`
-- `src/app/api/**/route.ts`
+- `src/server.ts`
+- `src/routes/**/route.ts`
 - `src/lib/api.ts`
 - `src/lib/send-validation.ts`
 - `src/lib/conversation-service.ts`
+- `src/lib/conversation-v2.ts`
 - `src/lib/outbox-service.ts`
 - `src/lib/webhook-handler.ts`
 - `src/lib/verify-webhook.ts`
 - `src/lib/email/**`
+- `src/lib/database/**`
 - `prisma/schema.prisma`
 - `prisma/migrations/**`
 - `tests/integration/**`
@@ -63,7 +66,8 @@ Inspect these first:
 
 ### 1. Build an evidence matrix
 
-For each registered route, capture:
+Build separate V1 and V2 evidence matrices, plus shared-route evidence. For each
+registered route, capture:
 
 - Method and path
 - Authentication requirements
@@ -76,10 +80,13 @@ For each registered route, capture:
 - Consistency and lifecycle notes
 - Test coverage and gaps
 
-Required route inventory for this repo:
+Required shared route inventory for this repo:
 
 - `GET /api/health/v1`
 - `POST /api/webhooks/resend/v1`
+
+Required V1 route inventory:
+
 - `POST /api/conversations/v1`
 - `GET /api/conversations/v1?assignment=unassigned`
 - `POST /api/conversations/v1/outbox`
@@ -90,6 +97,25 @@ Required route inventory for this repo:
 - `POST /api/conversations/v1/{conversationId}/messages/outbox`
 - `GET /api/conversations/v1/topics/{topicType}/{externalTopicId}`
 
+Required V2 route inventory:
+
+- `POST /api/conversations/v2`
+- `GET /api/conversations/v2?assignment=unassigned`
+- `POST /api/conversations/v2/outbox`
+- `POST /api/conversations/v2/outbox/drain`
+- `GET /api/conversations/v2/{conversationId}`
+- `PATCH /api/conversations/v2/{conversationId}`
+- `POST /api/conversations/v2/{conversationId}/messages`
+- `POST /api/conversations/v2/{conversationId}/messages/outbox`
+- `GET /api/conversations/v2/topics/{topicType}/{externalTopicId}`
+
+Use `src/server.ts` as the authoritative Express registration inventory. Trace
+each operation into its `src/routes/conversations/v1/**` or
+`src/routes/conversations/v2/**` handler and then into the relevant library,
+database schema or migration, and integration-test evidence. Record shared,
+version-specific, and cross-version behavior explicitly rather than assuming
+that equivalent route shapes have equivalent contracts.
+
 Do not add `/docs` or `/openapi.json` to the OpenAPI contract. They may be referenced in guides only as supporting resources.
 
 ### 2. Reconcile the contract
@@ -98,7 +124,7 @@ Update `public/openapi.json` so it matches supported behavior.
 
 Include:
 
-- All supported API operations above
+- All supported shared, V1, and V2 API operations above
 - Security requirements
 - Relevant header parameters
 - Request and response schemas

@@ -7,6 +7,7 @@ declare namespace NodeJS {
     RESEND_FROM: string;
     RESEND_REPLY_TO: string;
     CONVERSATION_API_KEY: string;
+    CONVERSATION_V2_API_KEY: string;
     OUTBOX_DRAIN_API_KEY: string;
   }
 }

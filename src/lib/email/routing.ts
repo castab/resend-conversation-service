@@ -9,6 +9,11 @@ interface MailboxParts {
   domain: string;
 }
 
+export interface RoutingCandidate {
+  routingToken: string;
+  baseAddress: string;
+}
+
 function parseBaseMailbox(address: string): MailboxParts | null {
   const normalized = address.trim().toLowerCase();
   const at = normalized.lastIndexOf('@');
@@ -97,4 +102,29 @@ export function extractRoutingTokens(
     }
   }
   return [...tokens];
+}
+
+export function extractRoutingCandidates(
+  addresses: readonly string[],
+): RoutingCandidate[] {
+  const candidates = new Map<string, RoutingCandidate>();
+  for (const rawAddress of addresses) {
+    const address = rawAddress.trim().toLowerCase();
+    const at = address.lastIndexOf('@');
+    const marker = address.lastIndexOf(`+${ROUTING_TAG_PREFIX}`, at);
+    if (at <= 0 || marker <= 0) {
+      continue;
+    }
+    const token = address.slice(marker + ROUTING_TAG_PREFIX.length + 1, at);
+    const baseAddress = `${address.slice(0, marker)}@${address.slice(at + 1)}`;
+    if (!TOKEN_PATTERN.test(token) || !parseBaseMailbox(baseAddress)) {
+      continue;
+    }
+    const routingToken = `${token.slice(0, 8)}-${token.slice(8, 12)}-${token.slice(12, 16)}-${token.slice(16, 20)}-${token.slice(20)}`;
+    candidates.set(`${routingToken}:${baseAddress}`, {
+      routingToken,
+      baseAddress,
+    });
+  }
+  return [...candidates.values()];
 }

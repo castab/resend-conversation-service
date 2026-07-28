@@ -176,14 +176,10 @@ export async function ensureInternetMessageId(
   return retrieved.message_id;
 }
 
-function formatAddress(address: string, name: string | null): string {
-  return name ? `${name} <${address}>` : address;
-}
-
 const DISPLAY_NAME_PHRASE_PATTERN =
   /^[A-Za-z0-9!#$%&'*+\-/=?^_`{|}~]+(?: [A-Za-z0-9!#$%&'*+\-/=?^_`{|}~]+)*$/;
 
-function formatReplyToAddress(address: string, name: string | null): string {
+function formatAddress(address: string, name: string | null): string {
   if (!name) {
     return address;
   }
@@ -201,10 +197,7 @@ export function buildSendEmailInput(message: EmailMessage): SendEmailInput {
     ...(message.replyToAddress === null
       ? {}
       : {
-          reply_to: formatReplyToAddress(
-            message.replyToAddress,
-            message.replyToName,
-          ),
+          reply_to: formatAddress(message.replyToAddress, message.replyToName),
         }),
     subject: message.subject,
     ...(message.textBody === null ? {} : { text: message.textBody }),

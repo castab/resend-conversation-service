@@ -87,6 +87,7 @@
   "files": {
     "includes": [
       "**",
+      "!**/build",
       "!**/dist",
       "!**/package-lock.json",
       "!**/src/generated/prisma",

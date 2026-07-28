@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-07-24
+- **Amended:** 2026-07-28
 - **Applies to:** inbound email → conversation association (threading)
 
 ## TL;DR
@@ -67,6 +68,45 @@ they treat threading headers.
 Keep a per-conversation routing token, embedded via plus-addressing in the outbound
 Reply-To, as a fallback matcher behind RFC header threading.
 
+### Amendment: V1 and V2 identity selection
+
+The routing-token decision now applies to two conversation API contracts:
+
+- **V1 is the frozen legacy contract.** The Reply-To base comes from
+  `RESEND_REPLY_TO`, and the From identity comes from `RESEND_FROM`. V1 has no
+  planned sunset.
+- **V2 is the forward contract.** Each send or enqueue request supplies
+  structured `from` and `replyTo` identities. Their addresses are canonicalized
+  to lowercase and must exactly match role-specific `FROM` and `REPLY_TO` rows
+  in the database allowlist. Display names do not grant address authority, and
+  a distinct mailbox alias requires its own exact allowlist row. There is no
+  allowlist management API.
+
+The first outbound intent fixes `EmailConversation.replyToBaseAddress`. Every
+outbound message for that conversation combines this fixed base with the
+existing `routingToken`; V2 cannot rotate the base by supplying a different
+allowed address. This preserves one stable routing address for replies.
+
+An authorized V2 reply can promote a V1 conversation when it supplies the same
+fixed Reply-To base. Promotion occurs when the V2 intent is successfully
+persisted, before a synchronous provider call; provider acceptance is not
+required, and a subsequent `502` does not roll promotion back. Promotion is
+one-way: subsequent V1 writes are rejected, while the V1 API itself remains
+available without a sunset for other V1 conversations.
+
+Inbound out-of-order recovery can discover that multiple conversation rows
+represent one conversation. Reconciliation never loses one-way V2 promotion:
+if a merged source is V2, the surviving row remains or becomes V2. The
+surviving row keeps its already-fixed base. Historical
+`(routingToken, replyToBaseAddress)` pairs from merged source rows are retained
+as routing aliases so replies to previously emitted addresses continue to
+resolve.
+
+The allowlist is checked before new V2 send intent is persisted. Removing a row
+therefore blocks later sends and enqueues but does not invalidate an outbox
+payload that was already authorized and persisted. Draining that payload does
+not re-evaluate the allowlist.
+
 ### How it works
 
 - **Generation:** a UUID per conversation, stored as
@@ -74,11 +114,11 @@ Reply-To, as a fallback matcher behind RFC header threading.
   defaulting to `gen_random_uuid()`.
 - **Encoding:** [`buildConversationReplyTo`](../src/lib/email/routing.ts) renders it as
   `<local>+c_<32 hex>@<domain>` (UUID lowercased, dashes stripped). The `c_` tag prefix
-  namespaces it; the base mailbox is validated so the generated local-part stays within
-  RFC length limits.
-- **Parsing:** [`extractRoutingTokens`](../src/lib/email/routing.ts) pulls the token
-  back out of inbound recipient addresses, re-inserts the dashes, and matches it against
-  `routingToken`.
+  namespaces it; the fixed base mailbox is validated so the generated local-part stays
+  within RFC length limits.
+- **Parsing:** [`extractRoutingCandidates`](../src/lib/email/routing.ts) pulls the token
+  and base mailbox out of inbound recipient addresses, re-inserts the token dashes, and
+  matches both values against the conversation's `routingToken` and fixed base.
 - **Requirement:** the receiving domain must accept plus-addressed mail to the base
   mailbox (Resend inbound does).
 
@@ -136,5 +176,8 @@ attempt that simplification.
   [`src/lib/email/conversations.ts`](../src/lib/email/conversations.ts),
   [`src/lib/conversation-service.ts`](../src/lib/conversation-service.ts)
 - Schema: [`prisma/schema.prisma`](../prisma/schema.prisma) (`EmailConversation.routingToken`)
+- V2 identity and promotion behavior:
+  [`src/lib/conversation-v2.ts`](../src/lib/conversation-v2.ts),
+  [`src/lib/database/email-address-allowlist.ts`](../src/lib/database/email-address-allowlist.ts)
 - Resend guidance on replying to inbound email:
   https://resend.com/docs/dashboard/receiving/reply-to-emails

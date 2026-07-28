@@ -84,12 +84,15 @@ export async function POST(request: Request) {
     const created = await client.emailConversation.create({
       data: {
         routingToken,
+        apiVersion: 'V1',
         topicType: validation.value.topic.type,
         externalTopicId: validation.value.topic.externalId,
         title: validation.value.topic.title,
         subject,
         participantAddress: validation.value.participant.email,
         participantName: validation.value.participant.name,
+        replyToBaseAddress: configuredReplyTo.trim().toLowerCase(),
+        replyToRequiresAllowlist: false,
         lastMessageAt: now,
         messages: {
           create: {
@@ -223,14 +226,26 @@ async function reopenFailedTopicConversation(
     if (liveMessage) {
       return null;
     }
+    const current = await transaction.emailConversation.findUniqueOrThrow({
+      where: { id: conversation.id },
+    });
+    if (current.apiVersion === 'V2') {
+      return null;
+    }
+    const replyToBaseAddress =
+      current.replyToBaseAddress ??
+      input.configuredReplyTo.trim().toLowerCase();
 
     await transaction.emailConversation.update({
       where: { id: conversation.id },
       data: {
+        apiVersion: 'V1',
         title: input.value.topic.title,
         subject: input.subject,
         participantAddress: input.value.participant.email,
         participantName: input.value.participant.name,
+        replyToBaseAddress,
+        replyToRequiresAllowlist: false,
         lastMessageAt: now,
       },
     });
@@ -244,7 +259,7 @@ async function reopenFailedTopicConversation(
         fromName: input.from.name,
         toAddress: input.value.participant.email,
         replyToAddress: buildConversationReplyTo(
-          input.configuredReplyTo,
+          replyToBaseAddress,
           conversation.routingToken,
         ),
         replyToName: input.value.message.replyToName ?? null,

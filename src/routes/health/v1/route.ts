@@ -16,6 +16,7 @@ export async function GET(request: Request) {
     !process.env.RESEND_REPLY_TO ||
     !isValidReplyToBaseAddress(process.env.RESEND_REPLY_TO) ||
     !process.env.CONVERSATION_API_KEY ||
+    !process.env.CONVERSATION_V2_API_KEY ||
     !process.env.OUTBOX_DRAIN_API_KEY
   ) {
     return Response.json({ status: 'unhealthy' }, { status: 503 });

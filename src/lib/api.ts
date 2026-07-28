@@ -15,6 +15,14 @@ export function authorize(request: Request): Response | null {
   );
 }
 
+export function authorizeV2(request: Request): Response | null {
+  return authorizeWithCredential(
+    request,
+    process.env.CONVERSATION_V2_API_KEY,
+    'CONVERSATION_V2_API_KEY',
+  );
+}
+
 export function authorizeOutboxDrain(request: Request): Response | null {
   return authorizeWithCredential(
     request,
@@ -162,7 +170,7 @@ export function serializeConversation(
       name: conversation.participantName,
     },
     replyToAddress: buildConversationReplyTo(
-      process.env.RESEND_REPLY_TO ?? '',
+      conversation.replyToBaseAddress ?? process.env.RESEND_REPLY_TO ?? '',
       conversation.routingToken,
     ),
     lastMessageAt: conversation.lastMessageAt.toISOString(),
