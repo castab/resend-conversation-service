@@ -17,10 +17,11 @@ export async function GET(
   if (unauthorized) {
     return unauthorized;
   }
-  const { conversationId } = await context.params;
-  if (!isUuid(conversationId)) {
+  const { conversationId: rawConversationId } = await context.params;
+  if (!isUuid(rawConversationId)) {
     return Response.json({ error: 'Invalid conversation ID' }, { status: 400 });
   }
+  const conversationId = rawConversationId.toLowerCase();
   return getConversationResponse(request, { id: conversationId });
 }
 
@@ -41,24 +42,32 @@ export async function PATCH(
     return Response.json({ error: topic.error }, { status: 400 });
   }
 
-  const { conversationId } = await context.params;
-  if (!isUuid(conversationId)) {
+  const { conversationId: rawConversationId } = await context.params;
+  if (!isUuid(rawConversationId)) {
     return Response.json({ error: 'Invalid conversation ID' }, { status: 400 });
   }
+  const conversationId = rawConversationId.toLowerCase();
   const client = getPrismaClient();
 
   try {
-    const assigned = await client.emailConversation.updateMany({
-      where: {
-        id: conversationId,
-        topicType: null,
-        externalTopicId: null,
-      },
-      data: {
-        topicType: topic.value.type,
-        externalTopicId: topic.value.externalId,
-        title: topic.value.title,
-      },
+    const assigned = await client.$transaction(async (transaction) => {
+      await transaction.$queryRaw`
+        SELECT pg_advisory_xact_lock(hashtext(${conversationId}))::text
+      `;
+      return transaction.emailConversation.updateMany({
+        where: {
+          id: conversationId,
+          topicType: null,
+          externalTopicId: null,
+          OR: [{ apiVersion: null }, { apiVersion: 'V1' }],
+        },
+        data: {
+          apiVersion: 'V1',
+          topicType: topic.value.type,
+          externalTopicId: topic.value.externalId,
+          title: topic.value.title,
+        },
+      });
     });
     if (assigned.count === 0) {
       const existing = await client.emailConversation.findUnique({
@@ -67,7 +76,9 @@ export async function PATCH(
       return Response.json(
         {
           error: existing
-            ? 'Conversation is already assigned to a topic'
+            ? existing.apiVersion === 'V2'
+              ? 'Conversation requires API v2'
+              : 'Conversation is already assigned to a topic'
             : 'Conversation not found',
         },
         { status: existing ? 409 : 404 },

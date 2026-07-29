@@ -42,10 +42,11 @@ export async function POST(
     return Response.json({ error: validation.error }, { status: 400 });
   }
 
-  const { conversationId } = await context.params;
-  if (!isUuid(conversationId)) {
+  const { conversationId: rawConversationId } = await context.params;
+  if (!isUuid(rawConversationId)) {
     return Response.json({ error: 'Invalid conversation ID' }, { status: 400 });
   }
+  const conversationId = rawConversationId.toLowerCase();
   const client = getPrismaClient();
   const requestHash = hashSendRequest({
     operation: 'outbox-reply-v1',
@@ -73,6 +74,12 @@ export async function POST(
   });
   if (!conversation) {
     return Response.json({ error: 'Conversation not found' }, { status: 404 });
+  }
+  if (conversation.apiVersion === 'V2') {
+    return Response.json(
+      { error: 'Conversation requires API v2' },
+      { status: 409 },
+    );
   }
   const parent = validation.value.replyToMessageId
     ? await client.emailMessage.findFirst({
@@ -119,8 +126,10 @@ export async function POST(
     return Response.json({ error: 'Server misconfiguration' }, { status: 500 });
   }
   const from = parseAddress(configuredFrom);
+  const replyToBaseAddress =
+    conversation.replyToBaseAddress ?? configuredReplyTo.trim().toLowerCase();
   const replyToAddress = buildConversationReplyTo(
-    configuredReplyTo,
+    replyToBaseAddress,
     conversation.routingToken,
   );
   const references = buildReferences(
@@ -131,6 +140,15 @@ export async function POST(
 
   try {
     const pending = await client.$transaction(async (transaction) => {
+      await transaction.$queryRaw`
+        SELECT pg_advisory_xact_lock(hashtext(${conversationId}))::text
+      `;
+      const current = await transaction.emailConversation.findUniqueOrThrow({
+        where: { id: conversationId },
+      });
+      if (current.apiVersion === 'V2') {
+        throw new Error('CONVERSATION_REQUIRES_V2');
+      }
       const message = await transaction.emailMessage.create({
         data: {
           conversationId,
@@ -156,7 +174,10 @@ export async function POST(
       });
       await transaction.$executeRaw`
         UPDATE email_conversations
-        SET last_message_at = GREATEST(last_message_at, ${now}),
+        SET api_version = 'V1',
+            reply_to_base_address = COALESCE(reply_to_base_address, ${replyToBaseAddress}),
+            reply_to_requires_allowlist = false,
+            last_message_at = GREATEST(last_message_at, ${now}),
             updated_at = now()
         WHERE id = ${conversationId}::uuid
       `;
@@ -167,6 +188,15 @@ export async function POST(
       { status: 202 },
     );
   } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message === 'CONVERSATION_REQUIRES_V2'
+    ) {
+      return Response.json(
+        { error: 'Conversation requires API v2' },
+        { status: 409 },
+      );
+    }
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === 'P2002'

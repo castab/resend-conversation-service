@@ -10,11 +10,18 @@ export class FakeResendServer {
     string,
     { body: string; ids: string[] }
   >();
+  private nextSendPause: {
+    arrived: () => void;
+    resumed: Promise<void>;
+    release: () => void;
+  } | null = null;
   failNextSendStatus: number | null = null;
   failNextBatchStatus: number | null = null;
   failNextBatchCode = 'application_error';
   disconnectAfterNextBatch = false;
+  disconnectAfterNextSend = false;
   malformedNextBatchResponse = false;
+  malformedNextSendResponse = false;
   sentMetadataFailuresRemaining = 0;
   sentMetadataRequestCount = 0;
   readonly sends: Array<{
@@ -28,6 +35,19 @@ export class FakeResendServer {
     ids: string[];
   }> = [];
   readonly received = new Map<string, ResendEmail>();
+
+  pauseNextSend() {
+    let arrived = () => {};
+    let release = () => {};
+    const arrival = new Promise<void>((resolve) => {
+      arrived = resolve;
+    });
+    const resumed = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.nextSendPause = { arrived, resumed, release };
+    return { arrival, release };
+  }
 
   async start(url: string) {
     const target = new URL(url);
@@ -52,6 +72,8 @@ export class FakeResendServer {
   }
 
   reset() {
+    this.nextSendPause?.release();
+    this.nextSendPause = null;
     this.sequence = 0;
     this.sends.length = 0;
     this.batches.length = 0;
@@ -61,7 +83,9 @@ export class FakeResendServer {
     this.failNextBatchStatus = null;
     this.failNextBatchCode = 'application_error';
     this.disconnectAfterNextBatch = false;
+    this.disconnectAfterNextSend = false;
     this.malformedNextBatchResponse = false;
+    this.malformedNextSendResponse = false;
     this.sentMetadataFailuresRemaining = 0;
     this.sentMetadataRequestCount = 0;
     this.received.clear();
@@ -162,6 +186,21 @@ export class FakeResendServer {
         if (idempotencyKey) {
           this.idempotentResponses.set(idempotencyKey, id);
         }
+      }
+      if (this.nextSendPause) {
+        const pause = this.nextSendPause;
+        this.nextSendPause = null;
+        pause.arrived();
+        await pause.resumed;
+      }
+      if (this.disconnectAfterNextSend) {
+        this.disconnectAfterNextSend = false;
+        response.destroy();
+        return;
+      }
+      if (this.malformedNextSendResponse) {
+        this.malformedNextSendResponse = false;
+        return json(response, 200, {});
       }
       return json(response, 200, { id });
     }

@@ -61,7 +61,11 @@ export async function POST(request: Request) {
     include: { conversation: true },
   });
   if (existing) {
-    if (existing.requestHash !== requestHash) {
+    if (
+      existing.kind !== 'CONVERSATION' ||
+      !existing.conversationId ||
+      existing.requestHash !== requestHash
+    ) {
       return Response.json(
         { error: 'Idempotency key was already used for a different request' },
         { status: 409 },
@@ -87,12 +91,15 @@ export async function POST(request: Request) {
     created = await client.emailConversation.create({
       data: {
         routingToken,
+        apiVersion: 'V1',
         topicType: validation.value.topic.type,
         externalTopicId: validation.value.topic.externalId,
         title: validation.value.topic.title,
         subject,
         participantAddress: validation.value.participant.email,
         participantName: validation.value.participant.name,
+        replyToBaseAddress: configuredReplyTo.trim().toLowerCase(),
+        replyToRequiresAllowlist: false,
         lastMessageAt: now,
         messages: {
           create: {
@@ -124,7 +131,11 @@ export async function POST(request: Request) {
         where: { idempotencyKey },
       });
       if (raced) {
-        if (raced.requestHash !== requestHash) {
+        if (
+          raced.kind !== 'CONVERSATION' ||
+          !raced.conversationId ||
+          raced.requestHash !== requestHash
+        ) {
           return Response.json(
             {
               error: 'Idempotency key was already used for a different request',
@@ -154,7 +165,11 @@ export async function POST(request: Request) {
           const racedReopen = await client.emailMessage.findUnique({
             where: { idempotencyKey },
           });
-          if (racedReopen && racedReopen.requestHash === requestHash) {
+          if (
+            racedReopen?.kind === 'CONVERSATION' &&
+            racedReopen.conversationId &&
+            racedReopen.requestHash === requestHash
+          ) {
             const recovered = await recoverPendingMessage(
               client,
               racedReopen.id,
@@ -257,14 +272,26 @@ async function reopenFailedTopicConversation(
     if (liveMessage) {
       return null;
     }
+    const current = await transaction.emailConversation.findUniqueOrThrow({
+      where: { id: conversation.id },
+    });
+    if (current.apiVersion === 'V2') {
+      return null;
+    }
+    const replyToBaseAddress =
+      current.replyToBaseAddress ??
+      input.configuredReplyTo.trim().toLowerCase();
 
     await transaction.emailConversation.update({
       where: { id: conversation.id },
       data: {
+        apiVersion: 'V1',
         title: input.value.topic.title,
         subject: input.subject,
         participantAddress: input.value.participant.email,
         participantName: input.value.participant.name,
+        replyToBaseAddress,
+        replyToRequiresAllowlist: false,
         lastMessageAt: now,
       },
     });
@@ -278,7 +305,7 @@ async function reopenFailedTopicConversation(
         fromName: input.from.name,
         toAddress: input.value.participant.email,
         replyToAddress: buildConversationReplyTo(
-          input.configuredReplyTo,
+          replyToBaseAddress,
           conversation.routingToken,
         ),
         replyToName: input.value.message.replyToName ?? null,

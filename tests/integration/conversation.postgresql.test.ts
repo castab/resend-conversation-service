@@ -9,6 +9,7 @@ describe('Private conversation API', () => {
   const resendServer = new FakeResendServer();
   const database = new Client({ connectionString: TEST_CONFIG.postgresql.url });
   const baseUrl = `${TEST_CONFIG.appBaseUrl}/api/conversations/v1`;
+  const baseUrlV2 = `${TEST_CONFIG.appBaseUrl}/api/conversations/v2`;
   const webhookUrl = `${TEST_CONFIG.appBaseUrl}/api/webhooks/resend/v1`;
 
   beforeAll(async () => {
@@ -25,7 +26,9 @@ describe('Private conversation API', () => {
   beforeEach(async () => {
     await database.query('TRUNCATE TABLE resend_wh_emails');
     await database.query('TRUNCATE TABLE email_outbox_batches CASCADE');
+    await database.query('TRUNCATE TABLE email_messages CASCADE');
     await database.query('TRUNCATE TABLE email_conversations CASCADE');
+    await database.query('TRUNCATE TABLE email_address_allowlist_entries');
     resendServer.reset();
   });
 
@@ -182,6 +185,381 @@ describe('Private conversation API', () => {
     expect(body.error).toBe(
       'message.replyToName must be a header-safe string of at most 256 characters',
     );
+  });
+
+  it('requires the dedicated V2 credential and structured identities', async () => {
+    const legacyCredential = await fetch(baseUrlV2, {
+      method: 'POST',
+      headers: headers('v2-legacy-credential'),
+      body: JSON.stringify(v2CreateBody('v2-auth')),
+    });
+    expect(legacyCredential.status).toBe(401);
+
+    const missingIdentity = await fetch(baseUrlV2, {
+      method: 'POST',
+      headers: v2Headers('v2-missing-identity'),
+      body: JSON.stringify(createBodyForTopic('v2-missing-identity')),
+    });
+    expect(missingIdentity.status).toBe(400);
+    await expect(missingIdentity.json()).resolves.toEqual({
+      error: 'message.from.address must be a valid email address',
+    });
+  });
+
+  it('authorizes V2 addresses by role and preserves display aliases', async () => {
+    const input = v2CreateBody('v2-identities');
+    const denied = await fetch(baseUrlV2, {
+      method: 'POST',
+      headers: v2Headers('v2-identities-denied'),
+      body: JSON.stringify(input),
+    });
+    expect(denied.status).toBe(400);
+    await expect(denied.json()).resolves.toEqual({
+      error:
+        'The requested email identity is not allowed. Contact the administrator.',
+    });
+    expect(resendServer.sends).toHaveLength(0);
+
+    await allowAddress(V2_FROM, 'REPLY_TO');
+    await allowAddress(V2_REPLY_TO, 'FROM');
+    const wrongRoles = await fetch(baseUrlV2, {
+      method: 'POST',
+      headers: v2Headers('v2-identities-wrong-roles'),
+      body: JSON.stringify(input),
+    });
+    expect(wrongRoles.status).toBe(400);
+
+    await allowAddress(V2_FROM, 'FROM');
+    await allowAddress(V2_REPLY_TO, 'REPLY_TO');
+    const response = await fetch(baseUrlV2, {
+      method: 'POST',
+      headers: v2Headers('v2-identities-allowed'),
+      body: JSON.stringify(input),
+    });
+    const body = await response.json();
+    expect(response.status).toBe(201);
+    expect(body.message.from).toEqual({
+      address: V2_FROM,
+      name: "Fiona's Ice Cream",
+    });
+    expect(body.message.replyToName).toBe('Booking Team');
+    expect(body.message.replyTo).toMatch(
+      /^booking-replies\+c_[0-9a-f]{32}@mail-dev\.fionasicecream\.com$/,
+    );
+    expect(resendServer.sends[0].input.from).toBe(
+      `Fiona's Ice Cream <${V2_FROM}>`,
+    );
+    expect(resendServer.sends[0].input.to).toEqual([
+      'Person <person@example.com>',
+      'Backup Person <backup@example.com>',
+    ]);
+    expect(resendServer.sends[0].input.reply_to).toBe(
+      `Booking Team <${body.message.replyTo}>`,
+    );
+    expect(resendServer.sends[0].input.tags).toEqual([
+      { name: 'category', value: 'booking_update' },
+    ]);
+  });
+
+  it('promotes a V1 conversation on V2 reply and blocks later V1 writes', async () => {
+    const created = await createConversation('v1-before-promotion');
+    await allowAddress(V2_FROM, 'FROM');
+    await allowAddress(TEST_CONFIG.replyToBaseAddress, 'REPLY_TO');
+
+    const promotedResponse = await fetch(
+      `${baseUrlV2}/${created.body.conversationId.toUpperCase()}/messages`,
+      {
+        method: 'POST',
+        headers: v2Headers('promote-v1-conversation'),
+        body: JSON.stringify({
+          text: 'Continue through V2.',
+          from: { address: V2_FROM, name: 'Booking Team' },
+          to: [
+            { address: 'person@example.com', name: 'Person' },
+            { address: 'backup@example.com', name: 'Backup Person' },
+          ],
+          replyTo: { address: TEST_CONFIG.replyToBaseAddress },
+          tags: [{ name: 'category', value: 'conversation_reply' }],
+        }),
+      },
+    );
+    expect(promotedResponse.status).toBe(201);
+    expect(resendServer.sends[1].input.to).toEqual([
+      'Person <person@example.com>',
+      'Backup Person <backup@example.com>',
+    ]);
+    expect(resendServer.sends[1].input.tags).toEqual([
+      { name: 'category', value: 'conversation_reply' },
+    ]);
+    const { rows } = await database.query(
+      'SELECT api_version, reply_to_requires_allowlist FROM email_conversations WHERE id = $1',
+      [created.body.conversationId],
+    );
+    expect(rows[0]).toMatchObject({
+      api_version: 'V2',
+      reply_to_requires_allowlist: true,
+    });
+
+    const legacyReply = await fetch(
+      `${baseUrl}/${created.body.conversationId}/messages`,
+      {
+        method: 'POST',
+        headers: headers('legacy-after-promotion'),
+        body: JSON.stringify({ text: 'Legacy reply.' }),
+      },
+    );
+    expect(legacyReply.status).toBe(409);
+    await expect(legacyReply.json()).resolves.toEqual({
+      error: 'Conversation requires API v2',
+    });
+
+    await database.query(
+      'DELETE FROM email_address_allowlist_entries WHERE address = $1 AND role = $2',
+      [TEST_CONFIG.replyToBaseAddress, 'REPLY_TO'],
+    );
+    const revokedReply = await fetch(
+      `${baseUrlV2}/${created.body.conversationId}/messages`,
+      {
+        method: 'POST',
+        headers: v2Headers('reply-after-revocation'),
+        body: JSON.stringify({
+          text: 'Should not send.',
+          from: { address: V2_FROM },
+          replyTo: { address: TEST_CONFIG.replyToBaseAddress },
+        }),
+      },
+    );
+    expect(revokedReply.status).toBe(400);
+    expect(resendServer.sends).toHaveLength(2);
+  });
+
+  it('keeps an authorized V2 outbox intent frozen after revocation', async () => {
+    await allowAddress(V2_FROM, 'FROM');
+    await allowAddress(V2_REPLY_TO, 'REPLY_TO');
+    const queued = await fetch(`${baseUrlV2}/outbox`, {
+      method: 'POST',
+      headers: v2Headers('v2-frozen-outbox'),
+      body: JSON.stringify(v2CreateBody('v2-frozen-outbox')),
+    });
+    expect(queued.status).toBe(202);
+
+    await database.query('TRUNCATE TABLE email_address_allowlist_entries');
+    const drained = await fetch(`${baseUrlV2}/outbox/drain`, {
+      method: 'POST',
+      headers: drainHeaders(),
+      body: JSON.stringify({ limit: 100 }),
+    });
+    expect(drained.status).toBe(200);
+    await expect(drained.json()).resolves.toMatchObject({ accepted: 1 });
+    expect(resendServer.batches).toHaveLength(1);
+    expect(resendServer.batches[0].inputs[0].from).toBe(
+      `Fiona's Ice Cream <${V2_FROM}>`,
+    );
+    expect(resendServer.batches[0].inputs[0].to).toEqual([
+      'Person <person@example.com>',
+      'Backup Person <backup@example.com>',
+    ]);
+    expect(resendServer.batches[0].inputs[0].tags).toEqual([
+      { name: 'category', value: 'booking_update' },
+    ]);
+  });
+
+  it('rejects a different allowed Reply-To base for a V2 conversation', async () => {
+    await allowAddress(V2_FROM, 'FROM');
+    await allowAddress(V2_REPLY_TO, 'REPLY_TO');
+    await allowAddress('support@mail-dev.fionasicecream.com', 'REPLY_TO');
+    const createdResponse = await fetch(baseUrlV2, {
+      method: 'POST',
+      headers: v2Headers('v2-fixed-base-opening'),
+      body: JSON.stringify(v2CreateBody('v2-fixed-base')),
+    });
+    const created = await createdResponse.json();
+
+    const reply = await fetch(
+      `${baseUrlV2}/${created.conversationId}/messages`,
+      {
+        method: 'POST',
+        headers: v2Headers('v2-different-base'),
+        body: JSON.stringify({
+          text: 'Wrong base.',
+          from: { address: V2_FROM },
+          replyTo: { address: 'support@mail-dev.fionasicecream.com' },
+        }),
+      },
+    );
+    expect(reply.status).toBe(400);
+  });
+
+  it('routes ancestry-free inbound mail through a persisted V2 Reply-To base', async () => {
+    await allowAddress(V2_FROM, 'FROM');
+    await allowAddress(V2_REPLY_TO, 'REPLY_TO');
+    const createdResponse = await fetch(baseUrlV2, {
+      method: 'POST',
+      headers: v2Headers('v2-custom-routing-opening'),
+      body: JSON.stringify(v2CreateBody('v2-custom-routing')),
+    });
+    const created = await createdResponse.json();
+    const event = fixtures.email.received({
+      data: {
+        email_id: 'em_v2_custom_routing',
+        message_id: '<v2-custom-routing@example.com>',
+        from: 'person@example.com',
+        to: [created.message.replyTo],
+        subject: 'Re: V2 custom routing',
+        created_at: '2026-07-28T15:00:00.000Z',
+      },
+    });
+    resendServer.received.set(event.data.email_id, {
+      id: event.data.email_id,
+      message_id: event.data.message_id as string,
+      from: event.data.from,
+      to: event.data.to,
+      subject: event.data.subject,
+      created_at: event.data.created_at,
+      text: 'Inbound through custom base',
+      html: null,
+      headers: {},
+      reply_to: [],
+    });
+    const signed = signPayload(
+      TEST_CONFIG.webhookSecret,
+      event,
+      generateSvixId(),
+    );
+    const webhook = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: signed.headers,
+      body: signed.body,
+    });
+    expect(webhook.status).toBe(200);
+    const { rows } = await database.query(
+      'SELECT conversation_id FROM email_messages WHERE resend_email_id = $1',
+      [event.data.email_id],
+    );
+    expect(rows[0].conversation_id).toBe(created.conversationId);
+
+    const alias = await database.query<{ routing_token: string }>(
+      `INSERT INTO email_conversation_routing_aliases
+        (conversation_id, routing_token, base_address)
+       VALUES ($1, gen_random_uuid(), 'legacy-replies@mail-dev.fionasicecream.com')
+       RETURNING routing_token`,
+      [created.conversationId],
+    );
+    await database.query(
+      `INSERT INTO email_conversation_routing_aliases
+        (conversation_id, routing_token, base_address)
+       VALUES ($1, $2, 'older-replies@mail-dev.fionasicecream.com')`,
+      [created.conversationId, alias.rows[0].routing_token],
+    );
+    for (const [index, local] of [
+      'legacy-replies',
+      'older-replies',
+    ].entries()) {
+      const token = alias.rows[0].routing_token.replaceAll('-', '');
+      const replyTo = `${local}+c_${token}@mail-dev.fionasicecream.com`;
+      const aliasEvent = fixtures.email.received({
+        data: {
+          email_id: `em_v2_routing_alias_${index}`,
+          message_id: `<v2-routing-alias-${index}@example.com>`,
+          from: 'person@example.com',
+          to: [replyTo],
+          subject: 'Re: V2 routing alias',
+          created_at: `2026-07-28T15:0${index + 1}:00.000Z`,
+        },
+      });
+      resendServer.received.set(aliasEvent.data.email_id, {
+        id: aliasEvent.data.email_id,
+        message_id: aliasEvent.data.message_id as string,
+        from: aliasEvent.data.from,
+        to: aliasEvent.data.to,
+        subject: aliasEvent.data.subject,
+        created_at: aliasEvent.data.created_at,
+        text: 'Inbound through routing alias',
+        html: null,
+        headers: {},
+        reply_to: [],
+      });
+      const aliasSigned = signPayload(
+        TEST_CONFIG.webhookSecret,
+        aliasEvent,
+        generateSvixId(),
+      );
+      const aliasWebhook = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: aliasSigned.headers,
+        body: aliasSigned.body,
+      });
+      expect(aliasWebhook.status).toBe(200);
+      const aliasMessage = await database.query(
+        'SELECT conversation_id FROM email_messages WHERE resend_email_id = $1',
+        [aliasEvent.data.email_id],
+      );
+      expect(aliasMessage.rows[0].conversation_id).toBe(created.conversationId);
+    }
+  });
+
+  it('claims an unassigned conversation through the mirrored V2 API', async () => {
+    const { rows } = await database.query<{ id: string }>(
+      `INSERT INTO email_conversations
+        (title, subject, participant_address, last_message_at, updated_at)
+       VALUES ('V2 inbound question', 'V2 inbound question', 'person@example.com', now(), now())
+       RETURNING id`,
+    );
+    const assigned = await fetch(`${baseUrlV2}/${rows[0].id}`, {
+      method: 'PATCH',
+      headers: v2Headers(),
+      body: JSON.stringify({
+        topic: {
+          type: 'booking',
+          externalId: 'v2-assignment',
+          title: 'V2 assignment',
+        },
+      }),
+    });
+    expect(assigned.status).toBe(200);
+
+    const byTopic = await fetch(`${baseUrlV2}/topics/booking/v2-assignment`, {
+      headers: v2Headers(),
+    });
+    expect(byTopic.status).toBe(200);
+
+    const legacyMutation = await fetch(`${baseUrl}/${rows[0].id}`, {
+      method: 'PATCH',
+      headers: headers(),
+      body: JSON.stringify({
+        topic: {
+          type: 'booking',
+          externalId: 'legacy-assignment',
+          title: 'Legacy assignment',
+        },
+      }),
+    });
+    expect(legacyMutation.status).toBe(409);
+    await expect(legacyMutation.json()).resolves.toEqual({
+      error: 'Conversation requires API v2',
+    });
+
+    const alreadyV2 = await database.query<{ id: string }>(
+      `INSERT INTO email_conversations
+        (api_version, title, subject, participant_address, last_message_at, updated_at)
+       VALUES ('V2', 'V2 reply first', 'V2 reply first', 'person@example.com', now(), now())
+       RETURNING id`,
+    );
+    const assignAfterV2Reply = await fetch(
+      `${baseUrlV2}/${alreadyV2.rows[0].id}`,
+      {
+        method: 'PATCH',
+        headers: v2Headers(),
+        body: JSON.stringify({
+          topic: {
+            type: 'booking',
+            externalId: 'v2-reply-before-assignment',
+            title: 'V2 reply before assignment',
+          },
+        }),
+      },
+    );
+    expect(assignAfterV2Reply.status).toBe(200);
   });
 
   it('reconciles delivery webhooks that arrive before send acceptance', async () => {
@@ -677,7 +1055,19 @@ describe('Private conversation API', () => {
     });
     return { response, body: await response.json() };
   }
+
+  async function allowAddress(address: string, role: 'FROM' | 'REPLY_TO') {
+    await database.query(
+      `INSERT INTO email_address_allowlist_entries (address, role)
+       VALUES (lower($1), $2::"EmailAddressRole")
+       ON CONFLICT (address, role) DO NOTHING`,
+      [address, role],
+    );
+  }
 });
+
+const V2_FROM = 'booking@mail-dev.fionasicecream.com';
+const V2_REPLY_TO = 'booking-replies@mail-dev.fionasicecream.com';
 
 function headers(idempotencyKey?: string): Record<string, string> {
   return {
@@ -691,6 +1081,14 @@ function drainHeaders(): Record<string, string> {
   return {
     authorization: `Bearer ${TEST_CONFIG.outboxDrainApiKey}`,
     'content-type': 'application/json',
+  };
+}
+
+function v2Headers(idempotencyKey?: string): Record<string, string> {
+  return {
+    authorization: `Bearer ${TEST_CONFIG.emailV2ApiKey}`,
+    'content-type': 'application/json',
+    ...(idempotencyKey ? { 'idempotency-key': idempotencyKey } : {}),
   };
 }
 
@@ -728,5 +1126,26 @@ function createBodyForTopic(
     },
     participant: { email: 'person@example.com', name: 'Person' },
     message: { text: 'Opening message', ...messageOverrides },
+  };
+}
+
+function v2CreateBody(externalId: string) {
+  return {
+    topic: {
+      type: 'booking',
+      externalId,
+      title: `Booking ${externalId}`,
+    },
+    participant: { email: 'person@example.com', name: 'Person' },
+    message: {
+      text: 'Opening message',
+      from: { address: V2_FROM, name: "Fiona's Ice Cream" },
+      to: [
+        { address: 'person@example.com', name: 'Person' },
+        { address: 'backup@example.com', name: 'Backup Person' },
+      ],
+      replyTo: { address: V2_REPLY_TO, name: 'Booking Team' },
+      tags: [{ name: 'category', value: 'booking_update' }],
+    },
   };
 }

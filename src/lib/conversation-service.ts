@@ -33,7 +33,7 @@ export async function deliverPendingMessage(
         const resend = getConfiguredResendClient();
         const sent = await resend.send(
           buildSendEmailInput(message),
-          `conversation/${message.id}`,
+          `${message.kind === 'DIRECT' ? 'email' : 'conversation'}/${message.id}`,
         );
         await transaction.emailMessage.update({
           where: { id: message.id },
@@ -80,6 +80,7 @@ async function hydrateSentMetadata(
   message: EmailMessage,
 ): Promise<EmailMessage> {
   if (
+    message.kind === 'DIRECT' ||
     message.state !== 'ACCEPTED' ||
     !message.resendEmailId ||
     message.internetMessageId
@@ -176,14 +177,10 @@ export async function ensureInternetMessageId(
   return retrieved.message_id;
 }
 
-function formatAddress(address: string, name: string | null): string {
-  return name ? `${name} <${address}>` : address;
-}
-
 const DISPLAY_NAME_PHRASE_PATTERN =
   /^[A-Za-z0-9!#$%&'*+\-/=?^_`{|}~]+(?: [A-Za-z0-9!#$%&'*+\-/=?^_`{|}~]+)*$/;
 
-function formatReplyToAddress(address: string, name: string | null): string {
+function formatAddress(address: string, name: string | null): string {
   if (!name) {
     return address;
   }
@@ -195,20 +192,21 @@ function formatReplyToAddress(address: string, name: string | null): string {
 }
 
 export function buildSendEmailInput(message: EmailMessage): SendEmailInput {
+  const tags = getTags(message);
   return {
     from: formatAddress(message.fromAddress, message.fromName),
-    to: [message.toAddress],
+    to: getRecipients(message).map(({ address, name }) =>
+      formatAddress(address, name),
+    ),
     ...(message.replyToAddress === null
       ? {}
       : {
-          reply_to: formatReplyToAddress(
-            message.replyToAddress,
-            message.replyToName,
-          ),
+          reply_to: formatAddress(message.replyToAddress, message.replyToName),
         }),
     subject: message.subject,
     ...(message.textBody === null ? {} : { text: message.textBody }),
     ...(message.htmlBody === null ? {} : { html: message.htmlBody }),
+    ...(tags.length ? { tags } : {}),
     ...(message.inReplyToInternetMessageId
       ? {
           headers: {
@@ -218,4 +216,41 @@ export function buildSendEmailInput(message: EmailMessage): SendEmailInput {
         }
       : {}),
   };
+}
+
+function getRecipients(
+  message: EmailMessage,
+): Array<{ address: string; name: string | null }> {
+  if (Array.isArray(message.toRecipients)) {
+    const recipients = message.toRecipients.filter(
+      (item): item is { address: string; name?: string | null } =>
+        typeof item === 'object' &&
+        item !== null &&
+        !Array.isArray(item) &&
+        typeof item.address === 'string' &&
+        (item.name === undefined ||
+          item.name === null ||
+          typeof item.name === 'string'),
+    );
+    if (recipients.length) {
+      return recipients.map(({ address, name = null }) => ({ address, name }));
+    }
+  }
+  return [{ address: message.toAddress, name: message.toName }];
+}
+
+function getTags(
+  message: EmailMessage,
+): Array<{ name: string; value: string }> {
+  if (!Array.isArray(message.tags)) {
+    return [];
+  }
+  return message.tags.filter(
+    (item): item is { name: string; value: string } =>
+      typeof item === 'object' &&
+      item !== null &&
+      !Array.isArray(item) &&
+      typeof item.name === 'string' &&
+      typeof item.value === 'string',
+  );
 }

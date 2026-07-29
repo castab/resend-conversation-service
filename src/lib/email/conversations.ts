@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { EmailConversation, EmailMessage } from '@/lib/database';
 import { Prisma, type PrismaClient } from '@/lib/database';
 import type { ResendEmail, ResendEmailClient } from './resend-client';
-import { extractRoutingTokens } from './routing';
+import { extractRoutingCandidates } from './routing';
 import {
   extractMessageIds,
   getHeader,
@@ -22,8 +22,99 @@ export interface MessageContent {
   html?: string;
 }
 
+type ConversationMessage = EmailMessage & {
+  conversationId: string;
+  conversation: EmailConversation;
+};
+
+function hasConversation<
+  T extends {
+    kind: EmailMessage['kind'];
+    conversationId: string | null;
+    conversation: EmailConversation | null;
+  },
+>(message: T): message is T & ConversationMessage {
+  return (
+    message.conversationId !== null &&
+    message.conversation !== null &&
+    message.kind === 'CONVERSATION'
+  );
+}
+
 export function hashSendRequest(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
+}
+
+async function preserveMergedConversationState(
+  transaction: Prisma.TransactionClient,
+  target: EmailConversation,
+  sources: EmailConversation[],
+) {
+  const uniqueSources = [
+    ...new Map(
+      sources
+        .filter((source) => source.id !== target.id)
+        .map((source) => [source.id, source]),
+    ).values(),
+  ];
+  if (!uniqueSources.length) {
+    return;
+  }
+
+  await transaction.emailConversationRoutingAlias.updateMany({
+    where: { conversationId: { in: uniqueSources.map((source) => source.id) } },
+    data: { conversationId: target.id },
+  });
+  await transaction.emailConversationRoutingAlias.createMany({
+    data: uniqueSources.flatMap((source) =>
+      source.replyToBaseAddress
+        ? [
+            {
+              conversationId: target.id,
+              routingToken: source.routingToken,
+              baseAddress: source.replyToBaseAddress,
+            },
+          ]
+        : [],
+    ),
+    skipDuplicates: true,
+  });
+
+  const promotedSource = uniqueSources.find(
+    (source) => source.apiVersion === 'V2' && source.replyToBaseAddress,
+  );
+  const selectedSource =
+    promotedSource ?? uniqueSources.find((source) => source.replyToBaseAddress);
+  const replyToBaseAddress =
+    target.replyToBaseAddress ?? selectedSource?.replyToBaseAddress;
+  const apiVersion =
+    target.apiVersion === 'V2' || promotedSource
+      ? 'V2'
+      : (target.apiVersion ??
+        uniqueSources.find((source) => source.apiVersion)?.apiVersion);
+  await transaction.emailConversation.update({
+    where: { id: target.id },
+    data: {
+      apiVersion,
+      replyToBaseAddress,
+      replyToRequiresAllowlist:
+        apiVersion === 'V2'
+          ? (target.apiVersion === 'V2' && target.replyToRequiresAllowlist) ||
+            Boolean(promotedSource?.replyToRequiresAllowlist)
+          : target.replyToRequiresAllowlist,
+    },
+  });
+}
+
+async function lockConversationIds(
+  transaction: Prisma.TransactionClient,
+  conversationIds: string[],
+) {
+  for (const conversationId of [...new Set(conversationIds)].sort()) {
+    await transaction.$queryRaw`
+      SELECT pg_advisory_xact_lock(hashtext(${conversationId}))::text
+    `;
+  }
 }
 
 const MAX_OUTBOUND_HYDRATION_CANDIDATES = 10;
@@ -139,7 +230,7 @@ export async function recordOutboundInternetMessageId(
         where: { id: messageId },
         include: { conversation: true },
       });
-      if (outbound.direction !== 'OUTBOUND') {
+      if (outbound.direction !== 'OUTBOUND' || !hasConversation(outbound)) {
         throw new Error('Cannot record sent metadata on an inbound message');
       }
 
@@ -158,9 +249,10 @@ export async function recordOutboundInternetMessageId(
         include: { conversation: true },
       });
       const eligibleChildren = waitingChildren.filter(
-        (child) =>
+        (child): child is typeof child & ConversationMessage =>
+          hasConversation(child) &&
           child.conversation.participantAddress.toLowerCase() ===
-          outbound.conversation.participantAddress.toLowerCase(),
+            outbound.conversation.participantAddress.toLowerCase(),
       );
       const unassignedConversationIds = [
         ...new Set(
@@ -175,6 +267,19 @@ export async function recordOutboundInternetMessageId(
       ];
 
       if (unassignedConversationIds.length) {
+        await lockConversationIds(transaction, [
+          outbound.conversationId,
+          ...unassignedConversationIds,
+        ]);
+        await preserveMergedConversationState(
+          transaction,
+          outbound.conversation,
+          eligibleChildren
+            .map((child) => child.conversation)
+            .filter((conversation) =>
+              unassignedConversationIds.includes(conversation.id),
+            ),
+        );
         await transaction.emailMessage.updateMany({
           where: { conversationId: { in: unassignedConversationIds } },
           data: { conversationId: outbound.conversationId },
@@ -239,15 +344,12 @@ export async function projectInboundEmail(
   const participant = parseAddress(eventData.from || email.from);
   const emailCreatedAt = new Date(email.created_at || eventData.created_at);
   const participantAddress = participant.address.toLowerCase();
-  const routingTokens = extractRoutingTokens(
-    [
-      ...email.to,
-      ...eventData.to,
-      ...(email.received_for ?? []),
-      ...(eventData.received_for ?? []),
-    ],
-    replyToBaseAddress,
-  );
+  const routingCandidates = extractRoutingCandidates([
+    ...email.to,
+    ...eventData.to,
+    ...(email.received_for ?? []),
+    ...(eventData.received_for ?? []),
+  ]);
 
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
@@ -264,6 +366,7 @@ export async function projectInboundEmail(
 
           const existing = await transaction.emailMessage.findFirst({
             where: {
+              kind: 'CONVERSATION',
               OR: [
                 { resendEmailId: eventData.email_id },
                 { internetMessageId },
@@ -277,14 +380,18 @@ export async function projectInboundEmail(
           const ancestry = [...references].reverse();
           const relatedMessages = ancestry.length
             ? await transaction.emailMessage.findMany({
-                where: { internetMessageId: { in: ancestry } },
+                where: {
+                  kind: 'CONVERSATION',
+                  internetMessageId: { in: ancestry },
+                },
                 include: { conversation: true },
               })
             : [];
           const eligibleMessages = relatedMessages.filter(
-            (message) =>
+            (message): message is typeof message & ConversationMessage =>
+              hasConversation(message) &&
               message.conversation.participantAddress.toLowerCase() ===
-              participantAddress,
+                participantAddress,
           );
           const parent = effectiveParentInternetMessageId
             ? eligibleMessages.find(
@@ -304,15 +411,17 @@ export async function projectInboundEmail(
           const waitingChildren = (
             await transaction.emailMessage.findMany({
               where: {
+                kind: 'CONVERSATION',
                 parentMessageId: null,
                 inReplyToInternetMessageId: internetMessageId,
               },
               include: { conversation: true },
             })
           ).filter(
-            (message) =>
+            (message): message is typeof message & ConversationMessage =>
+              hasConversation(message) &&
               message.conversation.participantAddress.toLowerCase() ===
-              participantAddress,
+                participantAddress,
           );
           const waitingConversation =
             waitingChildren.find(
@@ -333,20 +442,55 @@ export async function projectInboundEmail(
             parentConversation ??
             ancestorConversation ??
             waitingConversation;
-          if (!conversation && routingTokens.length) {
+          if (!conversation && routingCandidates.length) {
             const routedConversations =
               await transaction.emailConversation.findMany({
                 where: {
-                  routingToken: { in: routingTokens },
+                  OR: [
+                    {
+                      routingToken: {
+                        in: routingCandidates.map(
+                          (candidate) => candidate.routingToken,
+                        ),
+                      },
+                    },
+                    {
+                      routingAliases: {
+                        some: {
+                          routingToken: {
+                            in: routingCandidates.map(
+                              (candidate) => candidate.routingToken,
+                            ),
+                          },
+                        },
+                      },
+                    },
+                  ],
                 },
-                take: 2,
+                include: { routingAliases: true },
               });
-            if (
-              routedConversations.length === 1 &&
-              routedConversations[0].participantAddress.toLowerCase() ===
-                participantAddress
-            ) {
-              conversation = routedConversations[0];
+            const eligibleConversations = routedConversations.filter(
+              (candidateConversation) =>
+                candidateConversation.participantAddress.toLowerCase() ===
+                  participantAddress &&
+                (routingCandidates.some(
+                  (candidate) =>
+                    candidate.routingToken ===
+                      candidateConversation.routingToken &&
+                    candidate.baseAddress ===
+                      (candidateConversation.replyToBaseAddress ??
+                        replyToBaseAddress.trim().toLowerCase()),
+                ) ||
+                  candidateConversation.routingAliases.some((alias) =>
+                    routingCandidates.some(
+                      (candidate) =>
+                        candidate.routingToken === alias.routingToken &&
+                        candidate.baseAddress === alias.baseAddress,
+                    ),
+                  )),
+            );
+            if (eligibleConversations.length === 1) {
+              conversation = eligibleConversations[0];
             }
           }
           conversation ??= await transaction.emailConversation.create({
@@ -371,6 +515,21 @@ export async function projectInboundEmail(
             ),
           ];
           if (foreignUnassignedConversationIds.length) {
+            await lockConversationIds(transaction, [
+              conversation.id,
+              ...foreignUnassignedConversationIds,
+            ]);
+            await preserveMergedConversationState(
+              transaction,
+              conversation,
+              [...eligibleMessages, ...waitingChildren]
+                .map((message) => message.conversation)
+                .filter((candidateConversation) =>
+                  foreignUnassignedConversationIds.includes(
+                    candidateConversation.id,
+                  ),
+                ),
+            );
             await transaction.emailMessage.updateMany({
               where: {
                 conversationId: { in: foreignUnassignedConversationIds },
