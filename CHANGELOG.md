@@ -7,6 +7,8 @@ Versioning.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-29
+
 ### Added
 
 - Added `POST /api/emails/v2/outbox` for durable asynchronous direct email and
