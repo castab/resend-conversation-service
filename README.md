@@ -19,12 +19,12 @@ Resend
 
 Authorized callers
   -> API gateway or private service address
-  -> POST /api/emails/v2 (synchronous direct email)
+  -> /api/emails/v2 (synchronous or queued direct email)
      or /api/conversations/v1 (frozen legacy contract)
      or /api/conversations/v2 (forward contract)
   -> version-specific bearer authentication
   -> durable PostgreSQL send intent
-  -> synchronous Resend send or conversation transactional outbox
+  -> synchronous Resend send or shared transactional outbox
 ```
 
 The single process shares one Prisma client, deployment lifecycle, health
@@ -51,6 +51,8 @@ GET   /api/health/v2
 GET   /api/health/v1
 POST  /api/webhooks/resend/v1
 POST  /api/emails/v2
+POST  /api/emails/v2/outbox
+POST  /api/emails/v2/outbox/drain
 POST  /api/conversations/v1
 GET   /api/conversations/v1?assignment=unassigned
 POST  /api/conversations/v1/outbox
@@ -63,7 +65,7 @@ GET   /api/conversations/v1/topics/{topicType}/{externalTopicId}
 POST  /api/conversations/v2
 GET   /api/conversations/v2?assignment=unassigned
 POST  /api/conversations/v2/outbox
-POST  /api/conversations/v2/outbox/drain
+POST  /api/conversations/v2/outbox/drain  # deprecated compatibility alias
 GET   /api/conversations/v2/{conversationId}
 PATCH /api/conversations/v2/{conversationId}
 POST  /api/conversations/v2/{conversationId}/messages
@@ -78,7 +80,7 @@ The health endpoint is available at both `/api/health/v2` and
 readiness checks. The webhook requires a valid signature over the exact raw
 body and all three Svix headers. V1 conversation operations require
 `CONVERSATION_API_KEY`; V2 conversation operations and direct email require the
-separate `EMAIL_v2_API_KEY` (or `EMAIL_V2_API_KEY` as a fallback). Both outbox drain routes use
+separate `EMAIL_v2_API_KEY` (or `EMAIL_V2_API_KEY` as a fallback). All three outbox drain routes use
 `OUTBOX_DRAIN_API_KEY`. Sending and enqueueing operations also require
 `Idempotency-Key`.
 
@@ -100,12 +102,14 @@ optional `name`. Both addresses are canonicalized to lowercase and must match
 separate, role-specific database allowlist entries before new send intent is
 persisted. Display names are validated header text, not allowlisted identities.
 
-`POST /api/emails/v2` is V2-only and synchronously sends one direct email
-without creating a conversation or outbox entry. It requires structured `from`
-and `to` identities, a subject, and at least one of `text` or `html`. Only the
-normalized From address requires an exact `FROM` allowlist row. The endpoint
-does not accept `replyTo` and emits no Reply-To or RFC threading headers. Mail
-clients normally fall back to the From address when a recipient chooses Reply.
+`POST /api/emails/v2` synchronously sends direct email, while
+`POST /api/emails/v2/outbox` atomically queues the same request in the shared
+outbox. Neither creates a conversation. Both require structured `from` and
+one-or-more `to` identities, a subject, and at least one of `text` or `html`.
+Only the normalized From address requires an exact `FROM` allowlist row. Direct
+email does not accept `replyTo` and emits no Reply-To or RFC threading headers.
+Mail clients normally fall back to the From address when a recipient chooses
+Reply.
 
 A V2 reply promotes a V1 conversation when the V2 send intent is successfully
 persisted, before any synchronous provider call. Promotion therefore remains
@@ -128,8 +132,9 @@ provider and RFC identifiers, ordered reply ancestry, send state, projected
 outbound delivery state, content, and timestamps.
 
 Asynchronous sends persist the same pending message rows used by synchronous
-sends. Outbox rows coordinate fixed, ordered Resend batches and bounded retries
-without duplicating message content. Inbound messages are attached through RFC
+sends. Direct and conversation outbox rows share fixed, ordered Resend batches,
+capacity, retries, and batch-level terminal outcomes without duplicating
+message content. Inbound messages are attached through RFC
 headers, including repair when children arrive before their parent. If eligible
 RFC ancestry does not resolve a conversation, the service falls back to the
 conversation token in a `to` or `received_for` address. Token routing still
@@ -354,10 +359,13 @@ authentication enabled even when conversation routes are gateway-restricted.
 Configure Resend to deliver signed events to
 `https://<webhook-host>/api/webhooks/resend/v1`.
 
-Invoke either versioned `POST /api/conversations/{version}/outbox/drain` route at
-least once per minute when using asynchronous sends. Both routes use the same
-persisted outbox and drain credential; each request handles one bounded batch
-and does not poll internally.
+Invoke one shared drain route at least once per minute when using asynchronous
+sends. New deployments should use
+`POST /api/emails/v2/outbox/drain`; both versioned conversation drain paths
+remain supported as deprecated compatibility aliases. All routes use the same
+persisted outbox and drain credential, may process direct and conversation
+intent together, handle one bounded batch per request, and do not poll
+internally. Do not schedule every route for the same interval.
 
 ## Verification
 

@@ -59,7 +59,10 @@ function idempotencyConflictResponse() {
   );
 }
 
-export async function sendDirectEmailV2(request: Request) {
+export async function sendDirectEmailV2(
+  request: Request,
+  deliveryMode: 'synchronous' | 'outbox',
+) {
   const unauthorized = authorizeEmailV2(request);
   if (unauthorized) {
     return unauthorized;
@@ -79,7 +82,8 @@ export async function sendDirectEmailV2(request: Request) {
 
   const client = getPrismaClient();
   const requestHash = hashSendRequest({
-    operation: 'direct-email-v2',
+    operation:
+      deliveryMode === 'outbox' ? 'outbox-direct-email-v2' : 'direct-email-v2',
     request: validation.value,
   });
   const existing = await client.emailMessage.findUnique({
@@ -89,7 +93,11 @@ export async function sendDirectEmailV2(request: Request) {
     if (existing.kind !== 'DIRECT' || existing.requestHash !== requestHash) {
       return idempotencyConflictResponse();
     }
-    return replayResponse(await recoverPendingMessage(client, existing.id));
+    const message =
+      deliveryMode === 'outbox'
+        ? existing
+        : await recoverPendingMessage(client, existing.id);
+    return replayResponse(message);
   }
 
   if (
@@ -132,6 +140,7 @@ export async function sendDirectEmailV2(request: Request) {
           emailCreatedAt: new Date(),
           idempotencyKey,
           requestHash,
+          ...(deliveryMode === 'outbox' ? { outboxEntry: { create: {} } } : {}),
         },
       });
     });
@@ -155,7 +164,18 @@ export async function sendDirectEmailV2(request: Request) {
     ) {
       return idempotencyConflictResponse();
     }
-    return replayResponse(await recoverPendingMessage(client, raced.id));
+    const message =
+      deliveryMode === 'outbox'
+        ? raced
+        : await recoverPendingMessage(client, raced.id);
+    return replayResponse(message);
+  }
+
+  if (deliveryMode === 'outbox') {
+    return Response.json(
+      { email: serializeDirectEmail(message) },
+      { status: 202 },
+    );
   }
 
   try {
