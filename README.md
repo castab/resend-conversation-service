@@ -3,7 +3,8 @@
 [![Docker Hub](https://img.shields.io/docker/pulls/castab/resend-service?label=Docker%20Hub)](https://hub.docker.com/r/castab/resend-service) [![Docker Image Version](https://img.shields.io/docker/v/castab/resend-service?sort=semver&label=version)](https://hub.docker.com/r/castab/resend-service/tags)
 
 `resend-service` is one PostgreSQL-backed Express application for receiving
-Resend webhooks and managing topic-centered email conversations. An external
+Resend webhooks, managing topic-centered email conversations, and sending
+direct non-conversation email. An external
 API gateway controls which paths are publicly reachable; authentication and
 signature verification remain enforced by the application.
 
@@ -18,11 +19,12 @@ Resend
 
 Authorized callers
   -> API gateway or private service address
-  -> /api/conversations/v1 (frozen legacy contract)
+  -> POST /api/emails/v2 (synchronous direct email)
+     or /api/conversations/v1 (frozen legacy contract)
      or /api/conversations/v2 (forward contract)
   -> version-specific bearer authentication
-  -> synchronous Resend send or transactional outbox
-  -> PostgreSQL conversation projection
+  -> durable PostgreSQL send intent
+  -> synchronous Resend send or conversation transactional outbox
 ```
 
 The single process shares one Prisma client, deployment lifecycle, health
@@ -48,6 +50,7 @@ railway.json            # Railway build and deployment configuration
 GET   /api/health/v2
 GET   /api/health/v1
 POST  /api/webhooks/resend/v1
+POST  /api/emails/v2
 POST  /api/conversations/v1
 GET   /api/conversations/v1?assignment=unassigned
 POST  /api/conversations/v1/outbox
@@ -74,8 +77,8 @@ The health endpoint is available at both `/api/health/v2` and
 `/api/health/v1`; `v1` remains as a compatibility alias for deployment
 readiness checks. The webhook requires a valid signature over the exact raw
 body and all three Svix headers. V1 conversation operations require
-`CONVERSATION_API_KEY`; V2 conversation operations require the separate
-`CONVERSATION_V2_API_KEY`. Both outbox drain routes use
+`CONVERSATION_API_KEY`; V2 conversation operations and direct email require the
+separate `CONVERSATION_V2_API_KEY`. Both outbox drain routes use
 `OUTBOX_DRAIN_API_KEY`. Sending and enqueueing operations also require
 `Idempotency-Key`.
 
@@ -96,6 +99,13 @@ must provide structured `from` and `replyTo` objects with an `address` and an
 optional `name`. Both addresses are canonicalized to lowercase and must match
 separate, role-specific database allowlist entries before new send intent is
 persisted. Display names are validated header text, not allowlisted identities.
+
+`POST /api/emails/v2` is V2-only and synchronously sends one direct email
+without creating a conversation or outbox entry. It requires structured `from`
+and `to` identities, a subject, and at least one of `text` or `html`. Only the
+normalized From address requires an exact `FROM` allowlist row. The endpoint
+does not accept `replyTo` and emits no Reply-To or RFC threading headers. Mail
+clients normally fall back to the From address when a recipient chooses Reply.
 
 A V2 reply promotes a V1 conversation when the V2 send intent is successfully
 persisted, before any synchronous provider call. Promotion therefore remains
@@ -132,6 +142,11 @@ Outbound `accepted` state means Resend accepted the send API request. A message
 is only marked delivered after a matching `email.delivered` webhook is projected.
 Opened and clicked events are ingested into the webhook ledger when enabled in
 Resend, but they do not change delivery status.
+
+Direct email intent uses the same durable message and provider-idempotency
+state machine, but has no conversation relationship. Direct responses expose
+only the internal ID, send state, and Resend email ID. Matching lifecycle
+webhooks still project delivery state in PostgreSQL.
 
 Attachments are not retrieved or persisted. Returned HTML is untrusted and
 must be sanitized before browser rendering.
@@ -204,7 +219,8 @@ WHERE address = 'booking-replies@replies.example.com'
   AND role = 'REPLY_TO'::"EmailAddressRole";
 ```
 
-Revocation blocks new V2 send or enqueue intent that requests the address. It
+Revocation blocks new V2 send or enqueue intent that requests the address,
+including a direct email using a revoked From address. It
 does not cancel or alter an outbox message already persisted after a successful
 allowlist check; the drain sends that frozen payload.
 

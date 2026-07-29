@@ -8,4 +8,5 @@ export { getPrismaClient } from './client';
 export {
   isEmailAddressAllowed,
   lockAllowedEmailIdentities,
+  lockAllowedEmailIdentity,
 } from './email-address-allowlist';

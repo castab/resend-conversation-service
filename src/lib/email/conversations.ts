@@ -22,6 +22,25 @@ export interface MessageContent {
   html?: string;
 }
 
+type ConversationMessage = EmailMessage & {
+  conversationId: string;
+  conversation: EmailConversation;
+};
+
+function hasConversation<
+  T extends {
+    kind: EmailMessage['kind'];
+    conversationId: string | null;
+    conversation: EmailConversation | null;
+  },
+>(message: T): message is T & ConversationMessage {
+  return (
+    message.conversationId !== null &&
+    message.conversation !== null &&
+    message.kind === 'CONVERSATION'
+  );
+}
+
 export function hashSendRequest(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
@@ -211,7 +230,7 @@ export async function recordOutboundInternetMessageId(
         where: { id: messageId },
         include: { conversation: true },
       });
-      if (outbound.direction !== 'OUTBOUND') {
+      if (outbound.direction !== 'OUTBOUND' || !hasConversation(outbound)) {
         throw new Error('Cannot record sent metadata on an inbound message');
       }
 
@@ -230,9 +249,10 @@ export async function recordOutboundInternetMessageId(
         include: { conversation: true },
       });
       const eligibleChildren = waitingChildren.filter(
-        (child) =>
+        (child): child is typeof child & ConversationMessage =>
+          hasConversation(child) &&
           child.conversation.participantAddress.toLowerCase() ===
-          outbound.conversation.participantAddress.toLowerCase(),
+            outbound.conversation.participantAddress.toLowerCase(),
       );
       const unassignedConversationIds = [
         ...new Set(
@@ -346,6 +366,7 @@ export async function projectInboundEmail(
 
           const existing = await transaction.emailMessage.findFirst({
             where: {
+              kind: 'CONVERSATION',
               OR: [
                 { resendEmailId: eventData.email_id },
                 { internetMessageId },
@@ -359,14 +380,18 @@ export async function projectInboundEmail(
           const ancestry = [...references].reverse();
           const relatedMessages = ancestry.length
             ? await transaction.emailMessage.findMany({
-                where: { internetMessageId: { in: ancestry } },
+                where: {
+                  kind: 'CONVERSATION',
+                  internetMessageId: { in: ancestry },
+                },
                 include: { conversation: true },
               })
             : [];
           const eligibleMessages = relatedMessages.filter(
-            (message) =>
+            (message): message is typeof message & ConversationMessage =>
+              hasConversation(message) &&
               message.conversation.participantAddress.toLowerCase() ===
-              participantAddress,
+                participantAddress,
           );
           const parent = effectiveParentInternetMessageId
             ? eligibleMessages.find(
@@ -386,15 +411,17 @@ export async function projectInboundEmail(
           const waitingChildren = (
             await transaction.emailMessage.findMany({
               where: {
+                kind: 'CONVERSATION',
                 parentMessageId: null,
                 inReplyToInternetMessageId: internetMessageId,
               },
               include: { conversation: true },
             })
           ).filter(
-            (message) =>
+            (message): message is typeof message & ConversationMessage =>
+              hasConversation(message) &&
               message.conversation.participantAddress.toLowerCase() ===
-              participantAddress,
+                participantAddress,
           );
           const waitingConversation =
             waitingChildren.find(

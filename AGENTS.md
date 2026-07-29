@@ -30,7 +30,7 @@
   extend it with caller-selected identities.
 - Keep V2 as the forward contract using the separate
   `CONVERSATION_V2_API_KEY`; require structured caller-supplied `from` and
-  `replyTo` identities on every send or enqueue operation.
+  `replyTo` identities on every conversation send or enqueue operation.
 - Require the dedicated drain credential on the outbox drain operation.
 - Require `Idempotency-Key` on every operation that can send or enqueue email.
 - Persist send intent before calling Resend and never add unbounded retries.
@@ -59,6 +59,19 @@
 - Treat stored and returned HTML as untrusted.
 - Preserve fixed ordered outbox batch membership, bounded batch size, retry
   backoff, and the provider idempotency safety window.
+
+## Direct Email API
+
+- Keep direct email exactly `POST /api/emails/v2`; do not add a V1 or outbox
+  equivalent.
+- Require `CONVERSATION_V2_API_KEY`, `Idempotency-Key`, structured caller-supplied
+  `from` and singular `to` identities, a subject, and at least one body format.
+- Authorize only the canonical From address with an exact `FROM` allowlist row.
+  Do not allowlist recipients.
+- Reject `replyTo` and do not create a conversation, parent, routing token,
+  Reply-To header, or RFC threading headers.
+- Persist direct intent before Resend and keep it separate from conversation
+  projection while preserving global message idempotency and delivery events.
 
 ## Database
 

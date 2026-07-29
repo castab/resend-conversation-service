@@ -20,6 +20,11 @@ enum EmailMessageState {
   INDETERMINATE
 }
 
+enum EmailMessageKind {
+  CONVERSATION
+  DIRECT
+}
+
 enum EmailDeliveryState {
   UNKNOWN
   DELIVERED
@@ -88,7 +93,8 @@ model EmailAddressAllowlistEntry {
 
 model EmailMessage {
   id                          String              @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  conversationId              String              @map("conversation_id") @db.Uuid
+  kind                        EmailMessageKind    @default(CONVERSATION)
+  conversationId              String?             @map("conversation_id") @db.Uuid
   parentMessageId             String?             @map("parent_message_id") @db.Uuid
   direction                   EmailDirection
   state                       EmailMessageState
@@ -104,6 +110,7 @@ model EmailMessage {
   fromAddress                 String              @map("from_address")
   fromName                    String?             @map("from_name")
   toAddress                   String              @map("to_address")
+  toName                      String?             @map("to_name")
   replyToAddress              String?             @map("reply_to_address")
   replyToName                 String?             @map("reply_to_name")
   subject                     String
@@ -114,7 +121,7 @@ model EmailMessage {
   requestHash                 String?             @map("request_hash") @db.Char(64)
   createdAt                   DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                   DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
-  conversation                EmailConversation   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversation                EmailConversation?  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   parent                      EmailMessage?       @relation("EmailMessageReplies", fields: [parentMessageId], references: [id], onDelete: SetNull)
   replies                     EmailMessage[]      @relation("EmailMessageReplies")
   outboxEntry                 EmailOutboxEntry?

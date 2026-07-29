@@ -33,7 +33,7 @@ export async function deliverPendingMessage(
         const resend = getConfiguredResendClient();
         const sent = await resend.send(
           buildSendEmailInput(message),
-          `conversation/${message.id}`,
+          `${message.kind === 'DIRECT' ? 'email' : 'conversation'}/${message.id}`,
         );
         await transaction.emailMessage.update({
           where: { id: message.id },
@@ -80,6 +80,7 @@ async function hydrateSentMetadata(
   message: EmailMessage,
 ): Promise<EmailMessage> {
   if (
+    message.kind === 'DIRECT' ||
     message.state !== 'ACCEPTED' ||
     !message.resendEmailId ||
     message.internetMessageId
@@ -193,7 +194,7 @@ function formatAddress(address: string, name: string | null): string {
 export function buildSendEmailInput(message: EmailMessage): SendEmailInput {
   return {
     from: formatAddress(message.fromAddress, message.fromName),
-    to: [message.toAddress],
+    to: [formatAddress(message.toAddress, message.toName)],
     ...(message.replyToAddress === null
       ? {}
       : {

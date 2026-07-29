@@ -40,6 +40,14 @@ export type MessageV2Input = {
   replyTo: EmailIdentityInput;
 };
 
+export type DirectEmailV2Input = {
+  from: EmailIdentityInput;
+  to: EmailIdentityInput;
+  subject: string;
+  text?: string;
+  html?: string;
+};
+
 function normalizeReplyToName(value: unknown): string | null | undefined {
   if (value === undefined || value === null) {
     return null;
@@ -296,6 +304,69 @@ export function validateMessageV2Body(
         : {}),
       from: from.value,
       replyTo: replyTo.value,
+    },
+  };
+}
+
+export function validateDirectEmailV2Body(
+  value: unknown,
+): { value: DirectEmailV2Input } | { error: string } {
+  if (!isRecord(value)) {
+    return { error: 'Request body must be an object' };
+  }
+  if (value.replyTo !== undefined) {
+    return { error: 'replyTo is not supported for direct email' };
+  }
+
+  const from = normalizeEmailIdentity(value.from, 'from', false);
+  if ('error' in from) {
+    return from;
+  }
+  const to = normalizeEmailIdentity(value.to, 'to', false);
+  if ('error' in to) {
+    return to;
+  }
+  if (
+    !isHeaderSafeText(value.subject, MAX_SUBJECT_LENGTH) ||
+    !value.subject.trim()
+  ) {
+    return {
+      error:
+        'subject must be a nonempty header-safe string of at most 255 characters',
+    };
+  }
+
+  if (
+    value.text !== undefined &&
+    (typeof value.text !== 'string' || !value.text)
+  ) {
+    return { error: 'text must be a nonempty string when provided' };
+  }
+  if (
+    value.html !== undefined &&
+    (typeof value.html !== 'string' || !value.html)
+  ) {
+    return { error: 'html must be a nonempty string when provided' };
+  }
+  const text = typeof value.text === 'string' ? value.text : undefined;
+  const html = typeof value.html === 'string' ? value.html : undefined;
+  if (!text && !html) {
+    return { error: 'text or html is required' };
+  }
+  if (
+    (text?.length ?? 0) > MAX_BODY_LENGTH ||
+    (html?.length ?? 0) > MAX_BODY_LENGTH
+  ) {
+    return { error: 'text and html are limited to 1 MiB each' };
+  }
+
+  return {
+    value: {
+      from: from.value,
+      to: to.value,
+      subject: value.subject.trim(),
+      ...(text ? { text } : {}),
+      ...(html ? { html } : {}),
     },
   };
 }

@@ -26,6 +26,7 @@ describe('Private conversation API', () => {
   beforeEach(async () => {
     await database.query('TRUNCATE TABLE resend_wh_emails');
     await database.query('TRUNCATE TABLE email_outbox_batches CASCADE');
+    await database.query('TRUNCATE TABLE email_messages CASCADE');
     await database.query('TRUNCATE TABLE email_conversations CASCADE');
     await database.query('TRUNCATE TABLE email_address_allowlist_entries');
     resendServer.reset();

@@ -4,7 +4,7 @@ Contract version: `0.3.0`
 
 ## Service purpose
 
-`resend-service` owns topic-centered email conversations for one external participant per conversation. It persists outbound send intent before contacting Resend, projects inbound and delivery webhooks, and preserves parent relationships plus RFC `Message-ID` ancestry.
+`resend-service` owns topic-centered email conversations for one external participant per conversation and supports synchronous direct email that is not attached to a conversation. It persists outbound send intent before contacting Resend, projects inbound and delivery webhooks, and preserves parent relationships plus RFC `Message-ID` ancestry for conversations.
 
 The service is authoritative for:
 
@@ -13,13 +13,14 @@ The service is authoritative for:
 - Message threading, send state, and outbound delivery state
 - Idempotent synchronous and outbox send intent
 - Stable per-conversation Reply-To routing
+- Idempotent direct-email acceptance without conversation threading
 - Signed Resend webhook ingestion and inbound projection
 
 The service does not provide browser authentication, contact management, attachment retrieval, allowlist administration, or a general engagement analytics API. Returned HTML is untrusted and must be sanitized before browser rendering.
 
 ## Version choice
 
-Use conversation API V2 for new integrations. V2 is available under `/api/conversations/v2` and requires explicit authorized sender and Reply-To identities.
+Use conversation API V2 for new conversation integrations. V2 is available under `/api/conversations/v2` and requires explicit authorized sender and Reply-To identities. Use `POST /api/emails/v2` for synchronous notification or system email that does not need a conversation.
 
 Conversation API V1 remains available under `/api/conversations/v1` as a deprecated, frozen compatibility contract. There is no announced sunset. V1 continues to use only the server-configured `RESEND_FROM` and `RESEND_REPLY_TO`; callers cannot select V1 identities. New features belong in V2.
 
@@ -36,6 +37,7 @@ remains V1.
 - The V2 credential is separate from V1 and from the drain credential.
 - Missing or invalid credentials return `401` with `WWW-Authenticate: Bearer`.
 - Missing server-side credential configuration returns `500 {"error":"Server misconfiguration"}`.
+- The same credential authorizes `POST /api/emails/v2`.
 
 ### Deprecated conversation API V1
 
@@ -58,7 +60,7 @@ Never embed any bearer credential in browser code.
 
 ## V2 identity authorization
 
-Every V2 send or enqueue request requires structured `from` and `replyTo` identities:
+Every V2 conversation send or enqueue request requires structured `from` and `replyTo` identities:
 
 ```json
 {
@@ -85,6 +87,8 @@ Addresses containing whitespace are invalid. After validation, the service trims
 The key is the exact `(address, role)` pair. A row for the same address under the other role does not authorize it. There are no wildcard, domain, alias, display-name, or case-insensitive database lookup rules beyond request normalization to canonical lowercase. Allowlist administration is database-only; no management endpoint is exposed.
 
 For a new send intent, both rows must exist. Removing a row blocks later new V2 sends and enqueues. It does not alter or block an already-persisted outbox intent, and a replay of an already-persisted idempotent request is reconciled from stored state before a new authorization check.
+
+Direct email instead requires structured `from` and `to` identities. Only `from.address` requires an exact `FROM` row; recipients are not allowlisted. Direct-email sender revocation blocks new intent but does not change replay of intent already persisted under the same idempotency key.
 
 Authorization-policy failures deliberately return the same generic response and do not reveal which identity failed:
 
@@ -114,6 +118,7 @@ When a V1 conversation is promoted, its existing persisted `RESEND_REPLY_TO` bas
 
 | Method | Path | Purpose | Success | Main errors |
 | --- | --- | --- | --- | --- |
+| `POST` | `/api/emails/v2` | Synchronously send one email without a conversation or Reply-To header | `201`, replay `200`/`202` | `400`, `401`, `409`, `413`, `415`, `500`, `502` |
 | `POST` | `/api/conversations/v2` | Create and synchronously send an opening message | `201`, replay `200`/`202` | `400`, `401`, `409`, `413`, `415`, `500`, `502` |
 | `GET` | `/api/conversations/v2?assignment=unassigned` | List unassigned inbound conversations | `200` | `400`, `401`, `500` |
 | `POST` | `/api/conversations/v2/outbox` | Persist and enqueue an opening message | `202`, replay `200`/`202` | `400`, `401`, `409`, `413`, `415`, `500`, `502` |
@@ -125,6 +130,42 @@ When a V1 conversation is promoted, its existing persisted `RESEND_REPLY_TO` bas
 | `GET` | `/api/conversations/v2/topics/{topicType}/{externalTopicId}` | Read by external topic | `200` | `400`, `401`, `404`, `500` |
 
 All V2 routes except drain use `CONVERSATION_V2_API_KEY`. Drain uses only `OUTBOX_DRAIN_API_KEY`.
+
+## Direct email workflow
+
+Send `POST /api/emails/v2` with a globally unique `Idempotency-Key`:
+
+```json
+{
+  "from": {
+    "address": "notifications@example.com",
+    "name": "Example"
+  },
+  "to": {
+    "address": "person@example.com",
+    "name": "Person"
+  },
+  "subject": "Verify your email",
+  "text": "Use the verification link.",
+  "html": "<p>Use the verification link.</p>"
+}
+```
+
+The singular recipient and subject are required, and at least one of `text` or `html` must be nonempty. `replyTo` is rejected. The service creates no conversation, parent, routing token, outbox entry, Reply-To header, or RFC threading headers. Because standard mail clients fall back to the From mailbox when Reply-To is absent, select an appropriate monitored or no-reply From identity.
+
+New provider acceptance returns `201`:
+
+```json
+{
+  "email": {
+    "id": "0198409b-7c01-7def-8ad2-8b94ad8e8987",
+    "state": "accepted",
+    "resendEmailId": "4f8f0f13-8d5a-4e79-b32a-70f39d0a3f18"
+  }
+}
+```
+
+There is no V1 or outbox equivalent and no direct-email GET operation. Lifecycle webhooks continue to update the persisted direct intent, but that later delivery state is not exposed by this endpoint.
 
 ## V2 workflows
 
@@ -249,7 +290,7 @@ There is no sunset date for V1. Consumers should migrate writes to V2 rather tha
 - Topic titles and subjects reject ASCII control characters and are limited to 255 characters.
 - Participant names and identity display names reject ASCII control characters and are limited to 256 characters.
 - Unknown request object properties are ignored by runtime validators and do not participate in idempotency comparison.
-- Subject normalization strips leading `Re:`, `Fw:`, and `Fwd:` prefixes case-insensitively.
+- Conversation subject normalization strips leading `Re:`, `Fw:`, and `Fwd:` prefixes case-insensitively. Direct-email subjects are trimmed but otherwise preserved.
 - Health checks reject any query string with `400`.
 
 The implementation parses invalid or out-of-range GET `limit` values leniently, but that behavior is not part of the public contract. Send an integer from 1 through 100.
@@ -278,6 +319,8 @@ Successful send and enqueue operations return:
 
 Conversation reads return the conversation directly. Controlled errors use `{"error":"Human-readable message"}` without a separate machine code. Some uncaught infrastructure failures may not preserve that JSON shape.
 
+Direct email uses the compact `email` response shown above and does not echo identities, subject, or bodies.
+
 Message state meanings:
 
 | State | Meaning |
@@ -304,7 +347,7 @@ Outbound `deliveryState` is projected later from Resend lifecycle webhooks. `del
 | `502` | Provider rejection or indeterminate send outcome after persistence | Reuse the same key; never immediately create a new logical send |
 | `503` | Parent threading metadata retrieval failed | Retry later with backoff and the same logical request |
 
-For every synchronous or enqueue retry, reuse the original `Idempotency-Key` and the same normalized request. Keys are globally unique across V1, V2, synchronous, and outbox operations and are retained indefinitely. The V1 and V2 operation kind is included in normalized request hashing, so a key is not portable between versions or delivery modes.
+For every synchronous or enqueue retry, reuse the original `Idempotency-Key` and the same normalized request. Keys are globally unique across direct email, V1, V2, synchronous, and outbox operations and are retained indefinitely. The operation kind is included in normalized request hashing, so a key is not portable between route families, versions, or delivery modes.
 
 Same key plus the same normalized request returns stored state. Same key plus a different normalized request returns `409`. The service persists intent before provider calls. Do not generate a new key merely because the client timed out or received `502`.
 
@@ -334,7 +377,27 @@ Consumers need the deployed base URL and the credential for their route family. 
 
 V2 additionally requires database allowlist rows for each approved canonical address and role. Keep allowlist changes in controlled database administration; no application management API exists.
 
+Direct email requires only a `FROM` row for its sender. It does not require or consult a recipient or `REPLY_TO` row.
+
 ## Consumer example
+
+Direct email:
+
+```bash
+curl -i \
+  -X POST https://resend-service.example/api/emails/v2 \
+  -H "Authorization: Bearer <CONVERSATION_V2_API_KEY>" \
+  -H "Idempotency-Key: verification-user-4821" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "from":{"address":"notifications@example.com","name":"Example"},
+    "to":{"address":"person@example.com","name":"Person"},
+    "subject":"Verify your email",
+    "html":"<p>Use the verification link.</p>"
+  }'
+```
+
+Conversation opening:
 
 ```bash
 curl -i \

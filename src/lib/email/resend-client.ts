@@ -92,12 +92,22 @@ export function createResendEmailClient({
   }
 
   return {
-    send(input, idempotencyKey) {
-      return request<{ id: string }>('/emails', {
+    async send(input, idempotencyKey) {
+      const result = await request<unknown>('/emails', {
         method: 'POST',
         headers: { 'idempotency-key': idempotencyKey },
         body: JSON.stringify(input),
       });
+      if (
+        typeof result !== 'object' ||
+        result === null ||
+        !('id' in result) ||
+        typeof result.id !== 'string' ||
+        !result.id
+      ) {
+        throw new Error('Resend API returned an invalid email ID');
+      }
+      return { id: result.id };
     },
     sendBatch(input, idempotencyKey) {
       return request<{ data: Array<{ id: string }> }>('/emails/batch', {

@@ -61,7 +61,11 @@ export async function POST(request: Request) {
     include: { conversation: true },
   });
   if (existing) {
-    if (existing.requestHash !== requestHash) {
+    if (
+      existing.kind !== 'CONVERSATION' ||
+      !existing.conversationId ||
+      existing.requestHash !== requestHash
+    ) {
       return Response.json(
         { error: 'Idempotency key was already used for a different request' },
         { status: 409 },
@@ -127,7 +131,11 @@ export async function POST(request: Request) {
         where: { idempotencyKey },
       });
       if (raced) {
-        if (raced.requestHash !== requestHash) {
+        if (
+          raced.kind !== 'CONVERSATION' ||
+          !raced.conversationId ||
+          raced.requestHash !== requestHash
+        ) {
           return Response.json(
             {
               error: 'Idempotency key was already used for a different request',
@@ -157,7 +165,11 @@ export async function POST(request: Request) {
           const racedReopen = await client.emailMessage.findUnique({
             where: { idempotencyKey },
           });
-          if (racedReopen && racedReopen.requestHash === requestHash) {
+          if (
+            racedReopen?.kind === 'CONVERSATION' &&
+            racedReopen.conversationId &&
+            racedReopen.requestHash === requestHash
+          ) {
             const recovered = await recoverPendingMessage(
               client,
               racedReopen.id,

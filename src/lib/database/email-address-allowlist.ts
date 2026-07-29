@@ -32,3 +32,18 @@ export async function lockAllowedEmailIdentities(
   const roles = new Set(rows.map((row) => row.role));
   return roles.has('FROM') && roles.has('REPLY_TO');
 }
+
+export async function lockAllowedEmailIdentity(
+  transaction: Prisma.TransactionClient,
+  address: string,
+  role: EmailAddressRole,
+): Promise<boolean> {
+  const rows = await transaction.$queryRaw<Array<{ id: string }>>`
+    SELECT id
+    FROM email_address_allowlist_entries
+    WHERE address = ${address}
+      AND role = ${role}::"EmailAddressRole"
+    FOR KEY SHARE
+  `;
+  return rows.length === 1;
+}

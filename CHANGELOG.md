@@ -7,6 +7,12 @@ Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Added authenticated synchronous `POST /api/emails/v2` sends with structured
+  sender and recipient identities, exact `FROM` authorization, durable global
+  idempotency, and no conversation, Reply-To, outbox, or threading behavior.
+
 ## [0.3.0] - 2026-07-28
 
 ### Added

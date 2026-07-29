@@ -3,7 +3,7 @@
   "info": {
     "title": "resend-service API",
     "version": "0.3.0",
-    "description": "Receives signed Resend webhooks and provides bearer-authenticated, topic-centered email conversations. Conversation API v2 is current; conversation API v1 remains available as a deprecated, frozen compatibility surface with no announced sunset. The service preserves RFC reply relationships, supports synchronous and transactional-outbox sends, and stores untrusted email content without retrieving attachments.",
+    "description": "Receives signed Resend webhooks and provides bearer-authenticated topic-centered conversations plus synchronous direct email. Conversation API v2 is current; conversation API v1 remains available as a deprecated, frozen compatibility surface with no announced sunset. The service persists outbound intent before contacting Resend, preserves RFC reply relationships for conversations, and stores untrusted email content without retrieving attachments.",
     "license": {
       "name": "MIT",
       "identifier": "MIT"
@@ -32,6 +32,10 @@
     {
       "name": "Messages",
       "description": "Send messages in an existing conversation"
+    },
+    {
+      "name": "Direct email",
+      "description": "Synchronously send email without a conversation or Reply-To header"
     },
     {
       "name": "Operations",
@@ -1236,6 +1240,94 @@
         }
       }
     },
+    "/api/emails/v2": {
+      "post": {
+        "operationId": "sendDirectEmailV2",
+        "summary": "Send a direct email without a conversation",
+        "description": "Persists a direct outbound email intent and synchronously sends it through Resend. The normalized from.address must exactly match a FROM allowlist entry; the singular recipient is not allowlisted. No conversation, parent, routing token, Reply-To header, or RFC threading headers are created. Without a Reply-To header, mail clients normally direct replies to the From address.",
+        "tags": ["Direct email"],
+        "security": [{ "conversationV2Auth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/DirectEmailV2Request" },
+              "example": {
+                "from": {
+                  "address": "notifications@example.com",
+                  "name": "Example"
+                },
+                "to": {
+                  "address": "person@example.com",
+                  "name": "Person"
+                },
+                "subject": "Verify your email",
+                "text": "Use the verification link.",
+                "html": "<p>Use the verification link.</p>"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "A completed idempotent replay.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectEmailSendResult"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Resend accepted the newly persisted email.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectEmailSendResult"
+                },
+                "example": {
+                  "email": {
+                    "id": "0198409b-7c01-7def-8ad2-8b94ad8e8987",
+                    "state": "accepted",
+                    "resendEmailId": "4f8f0f13-8d5a-4e79-b32a-70f39d0a3f18"
+                  }
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "An idempotent replay found intent that is still pending.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectEmailSendResult"
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "413": { "$ref": "#/components/responses/PayloadTooLarge" },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedContentEncoding"
+          },
+          "500": { "$ref": "#/components/responses/ServerError" },
+          "502": {
+            "description": "The persisted send failed or its provider outcome is indeterminate.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectEmailSendFailure"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/conversations/v2": {
       "post": {
         "operationId": "createConversationV2",
@@ -1744,7 +1836,7 @@
       "conversationV2Auth": {
         "type": "http",
         "scheme": "bearer",
-        "description": "Conversation API v2 credential supplied from the separate CONVERSATION_V2_API_KEY. It is not interchangeable with the V1 or outbox-drain credential."
+        "description": "Current V2 credential supplied from CONVERSATION_V2_API_KEY. It authorizes conversation V2 operations and direct email; it is not interchangeable with the V1 or outbox-drain credential."
       },
       "outboxDrainAuth": {
         "type": "http",
@@ -1802,7 +1894,7 @@
         "name": "Idempotency-Key",
         "in": "header",
         "required": true,
-        "description": "Caller-generated key unique to one logical send request. Idempotency compares normalized validated fields; unknown body properties are ignored and do not produce a conflict. Keys are globally unique across synchronous and outbox delivery modes.",
+        "description": "Caller-generated key unique to one logical send request. Idempotency compares normalized validated fields; unknown body properties are ignored and do not produce a conflict. Keys are globally unique across direct email, API versions, and synchronous and outbox delivery modes.",
         "schema": {
           "type": "string",
           "minLength": 1,
@@ -1902,7 +1994,7 @@
             "type": "string",
             "format": "email",
             "maxLength": 320,
-            "description": "Trimmed and normalized to lowercase before exact role-specific allowlist authorization."
+            "description": "Trimmed and normalized to lowercase. Authorization requirements depend on the request field."
           },
           "name": {
             "type": ["string", "null"],
@@ -2051,6 +2143,41 @@
           }
         ],
         "description": "V2 does not support the V1 replyToName property; use replyTo.name."
+      },
+      "DirectEmailV2Request": {
+        "type": "object",
+        "required": ["from", "to", "subject"],
+        "properties": {
+          "from": {
+            "allOf": [{ "$ref": "#/components/schemas/EmailIdentity" }],
+            "description": "Sender identity. The normalized address must exactly match a database allowlist row with role FROM."
+          },
+          "to": {
+            "allOf": [{ "$ref": "#/components/schemas/EmailIdentity" }],
+            "description": "Singular recipient identity. The recipient is not checked against the identity allowlist."
+          },
+          "subject": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "pattern": "^(?=.*\\S)[^\\u0000-\\u001F\\u007F]{1,255}$",
+            "description": "Required nonblank header-safe subject. Leading and trailing whitespace is removed."
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1048576
+          },
+          "html": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1048576,
+            "description": "Untrusted HTML content."
+          },
+          "replyTo": false
+        },
+        "anyOf": [{ "required": ["text"] }, { "required": ["html"] }],
+        "description": "Direct email intentionally does not support Reply-To or threading fields."
       },
       "AssignTopicRequest": {
         "type": "object",
@@ -2402,6 +2529,43 @@
                 "type": "string"
               }
             }
+          }
+        ]
+      },
+      "DirectEmailState": {
+        "type": "string",
+        "enum": ["pending", "accepted", "failed", "indeterminate"]
+      },
+      "DirectEmailSummary": {
+        "type": "object",
+        "required": ["id", "state", "resendEmailId"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable internal direct-email intent identifier."
+          },
+          "state": { "$ref": "#/components/schemas/DirectEmailState" },
+          "resendEmailId": {
+            "type": ["string", "null"],
+            "description": "Provider identifier after acceptance; null while pending or when no acceptance was confirmed."
+          }
+        }
+      },
+      "DirectEmailSendResult": {
+        "type": "object",
+        "required": ["email"],
+        "properties": {
+          "email": { "$ref": "#/components/schemas/DirectEmailSummary" }
+        }
+      },
+      "DirectEmailSendFailure": {
+        "allOf": [
+          { "$ref": "#/components/schemas/DirectEmailSendResult" },
+          {
+            "type": "object",
+            "required": ["error"],
+            "properties": { "error": { "type": "string" } }
           }
         ]
       },
