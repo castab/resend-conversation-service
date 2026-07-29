@@ -1,4 +1,4 @@
-import { authorizeV2, getPageLimit, isUuid } from '@/lib/api';
+import { authorizeEmailV2, getPageLimit, isUuid } from '@/lib/api';
 import { createConversationV2 } from '@/lib/conversation-v2';
 import { getPrismaClient } from '@/lib/database';
 
@@ -7,7 +7,7 @@ export async function POST(request: Request) {
 }
 
 export async function GET(request: Request) {
-  const unauthorized = authorizeV2(request);
+  const unauthorized = authorizeEmailV2(request);
   if (unauthorized) {
     return unauthorized;
   }

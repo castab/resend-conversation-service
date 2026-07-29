@@ -1,4 +1,4 @@
-import { authorizeV2, readJson } from '@/lib/api';
+import { authorizeEmailV2, readJson } from '@/lib/api';
 import {
   deliverPendingMessage,
   recoverPendingMessage,
@@ -60,7 +60,7 @@ function idempotencyConflictResponse() {
 }
 
 export async function sendDirectEmailV2(request: Request) {
-  const unauthorized = authorizeV2(request);
+  const unauthorized = authorizeEmailV2(request);
   if (unauthorized) {
     return unauthorized;
   }

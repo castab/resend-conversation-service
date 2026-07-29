@@ -1,4 +1,4 @@
-import { authorizeV2, getConversationResponse } from '@/lib/api';
+import { authorizeEmailV2, getConversationResponse } from '@/lib/api';
 
 export async function GET(
   request: Request,
@@ -6,7 +6,7 @@ export async function GET(
     params: Promise<{ topicType: string; externalTopicId: string }>;
   },
 ) {
-  const unauthorized = authorizeV2(request);
+  const unauthorized = authorizeEmailV2(request);
   if (unauthorized) {
     return unauthorized;
   }

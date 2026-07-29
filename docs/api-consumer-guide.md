@@ -33,7 +33,7 @@ remains V1.
 
 ### Conversation API V2
 
-- Send `Authorization: Bearer <CONVERSATION_V2_API_KEY>`.
+- Send `Authorization: Bearer <EMAIL_v2_API_KEY>`.
 - The V2 credential is separate from V1 and from the drain credential.
 - Missing or invalid credentials return `401` with `WWW-Authenticate: Bearer`.
 - Missing server-side credential configuration returns `500 {"error":"Server misconfiguration"}`.
@@ -129,7 +129,7 @@ When a V1 conversation is promoted, its existing persisted `RESEND_REPLY_TO` bas
 | `POST` | `/api/conversations/v2/{conversationId}/messages/outbox` | Persist and enqueue a reply | `202`, replay `200`/`202` | `400`, `401`, `404`, `409`, `413`, `415`, `500`, `502`, `503` |
 | `GET` | `/api/conversations/v2/topics/{topicType}/{externalTopicId}` | Read by external topic | `200` | `400`, `401`, `404`, `500` |
 
-All V2 routes except drain use `CONVERSATION_V2_API_KEY`. Drain uses only `OUTBOX_DRAIN_API_KEY`.
+All V2 routes except drain use `EMAIL_v2_API_KEY`. Drain uses only `OUTBOX_DRAIN_API_KEY`.
 
 ## Direct email workflow
 
@@ -372,7 +372,7 @@ Consumers need the deployed base URL and the credential for their route family. 
 - `RESEND_WEBHOOK_SECRET`
 - `RESEND_FROM` and `RESEND_REPLY_TO` for frozen V1 behavior
 - `CONVERSATION_API_KEY` for V1
-- `CONVERSATION_V2_API_KEY` for V2
+- `EMAIL_v2_API_KEY` for V2
 - `OUTBOX_DRAIN_API_KEY` for the shared drain
 
 V2 additionally requires database allowlist rows for each approved canonical address and role. Keep allowlist changes in controlled database administration; no application management API exists.
@@ -386,7 +386,7 @@ Direct email:
 ```bash
 curl -i \
   -X POST https://resend-service.example/api/emails/v2 \
-  -H "Authorization: Bearer <CONVERSATION_V2_API_KEY>" \
+  -H "Authorization: Bearer <EMAIL_v2_API_KEY>" \
   -H "Idempotency-Key: verification-user-4821" \
   -H "Content-Type: application/json" \
   -d '{
@@ -402,7 +402,7 @@ Conversation opening:
 ```bash
 curl -i \
   -X POST https://resend-service.example/api/conversations/v2 \
-  -H "Authorization: Bearer <CONVERSATION_V2_API_KEY>" \
+  -H "Authorization: Bearer <EMAIL_v2_API_KEY>" \
   -H "Idempotency-Key: booking-4821-opening" \
   -H "Content-Type: application/json" \
   -d '{

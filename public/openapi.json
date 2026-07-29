@@ -1246,7 +1246,7 @@
         "summary": "Send a direct email without a conversation",
         "description": "Persists a direct outbound email intent and synchronously sends it through Resend. The normalized from.address must exactly match a FROM allowlist entry; the singular recipient is not allowlisted. No conversation, parent, routing token, Reply-To header, or RFC threading headers are created. Without a Reply-To header, mail clients normally direct replies to the From address.",
         "tags": ["Direct email"],
-        "security": [{ "conversationV2Auth": [] }],
+        "security": [{ "emailV2Auth": [] }],
         "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
         "requestBody": {
           "required": true,
@@ -1334,7 +1334,7 @@
         "summary": "Start a topic conversation with explicit identities",
         "description": "Creates the single conversation for an external topic and sends its opening email. message.from and message.replyTo are required structured identities. Their normalized addresses must have exact allowlist rows for the FROM and REPLY_TO roles respectively. The Reply-To address must be an untagged base address; the service persists it for the conversation and sends from base-local+c_<32 lowercase hex routing token>@domain. Identity or fixed-base rejection uses one generic 400 response. A failed V1 topic conversation may be reopened and promoted to V2 when all prior messages are failed and its persisted Reply-To base is absent or equals the requested base. Promotion occurs when the V2 intent is successfully persisted, before the provider call, so a subsequent 502 does not undo it.",
         "tags": ["Conversations"],
-        "security": [{ "conversationV2Auth": [] }],
+        "security": [{ "emailV2Auth": [] }],
         "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
         "requestBody": {
           "required": true,
@@ -1437,7 +1437,7 @@
         "summary": "List unassigned inbound conversations",
         "description": "V2 mirror of the unassigned conversation list. Reads are not version-filtered.",
         "tags": ["Conversations"],
-        "security": [{ "conversationV2Auth": [] }],
+        "security": [{ "emailV2Auth": [] }],
         "parameters": [
           {
             "name": "assignment",
@@ -1476,7 +1476,7 @@
         "summary": "Queue a topic conversation with explicit identities",
         "description": "Atomically creates the V2 conversation, pending opening message, and outbox entry. Identity allowlist and fixed Reply-To base rules match the synchronous V2 operation. Allowlist authorization is frozen into the queued message; later allowlist removal does not cancel an already-authorized outbox intent. Replaying the same idempotency key and normalized request returns 202 while the stored message remains pending, 200 after acceptance, or 502 after a failed or indeterminate outcome.",
         "tags": ["Outbox"],
-        "security": [{ "conversationV2Auth": [] }],
+        "security": [{ "emailV2Auth": [] }],
         "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
         "requestBody": {
           "required": true,
@@ -1573,7 +1573,7 @@
         "summary": "Get a conversation by service ID",
         "description": "Reads any conversation visible to the service, including V1 conversations; reading does not promote it to V2.",
         "tags": ["Conversations"],
-        "security": [{ "conversationV2Auth": [] }],
+        "security": [{ "emailV2Auth": [] }],
         "parameters": [
           { "$ref": "#/components/parameters/Limit" },
           { "$ref": "#/components/parameters/Before" }
@@ -1598,7 +1598,7 @@
         "summary": "Assign an unassigned conversation through V2",
         "description": "Assigns a topic exactly once and records the conversation as V2. The conversation must be unassigned and its API version must be null or already V2; a V1 conversation cannot be assigned through this operation.",
         "tags": ["Conversations"],
-        "security": [{ "conversationV2Auth": [] }],
+        "security": [{ "emailV2Auth": [] }],
         "requestBody": {
           "required": true,
           "content": {
@@ -1634,7 +1634,7 @@
         "summary": "Continue a conversation with explicit identities",
         "description": "Sends a reply using required from and replyTo identities. Exact role-specific allowlist rows are checked before conversation lookup. The requested Reply-To base must equal the conversation's persisted base once set. Persisting the V2 reply intent atomically promotes a V1 conversation to V2 and makes future V1 reply and enqueue writes return 409. Promotion does not require provider acceptance and remains committed if the subsequent synchronous provider call returns 502. Parent selection and RFC threading match V1.",
         "tags": ["Messages"],
-        "security": [{ "conversationV2Auth": [] }],
+        "security": [{ "emailV2Auth": [] }],
         "parameters": [
           { "$ref": "#/components/parameters/ConversationId" },
           { "$ref": "#/components/parameters/IdempotencyKey" }
@@ -1729,7 +1729,7 @@
         "summary": "Queue a conversation reply with explicit identities",
         "description": "Resolves and freezes the reply parent, RFC ancestry, approved identities, and generated Reply-To address, then atomically creates a pending message and outbox entry. A V1 conversation is promoted to V2 when the queued intent is persisted. Later allowlist removal does not cancel that queued intent. Replaying the same idempotency key and normalized request returns 202 while the stored message remains pending, 200 after acceptance, or 502 after a failed or indeterminate outcome.",
         "tags": ["Outbox"],
-        "security": [{ "conversationV2Auth": [] }],
+        "security": [{ "emailV2Auth": [] }],
         "parameters": [
           { "$ref": "#/components/parameters/ConversationId" },
           { "$ref": "#/components/parameters/IdempotencyKey" }
@@ -1802,7 +1802,7 @@
         "summary": "Get a conversation by external topic",
         "description": "Reads any conversation for the topic, including V1 conversations; reading does not promote it to V2.",
         "tags": ["Conversations"],
-        "security": [{ "conversationV2Auth": [] }],
+        "security": [{ "emailV2Auth": [] }],
         "parameters": [
           { "$ref": "#/components/parameters/TopicType" },
           { "$ref": "#/components/parameters/ExternalTopicId" },
@@ -1833,10 +1833,10 @@
         "scheme": "bearer",
         "description": "Deprecated conversation API v1 credential supplied from CONVERSATION_API_KEY. V1 is frozen and has no announced sunset."
       },
-      "conversationV2Auth": {
+      "emailV2Auth": {
         "type": "http",
         "scheme": "bearer",
-        "description": "Current V2 credential supplied from CONVERSATION_V2_API_KEY. It authorizes conversation V2 operations and direct email; it is not interchangeable with the V1 or outbox-drain credential."
+        "description": "Current V2 credential supplied from EMAIL_v2_API_KEY. It authorizes conversation V2 operations and direct email; it is not interchangeable with the V1 or outbox-drain credential."
       },
       "outboxDrainAuth": {
         "type": "http",

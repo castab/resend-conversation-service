@@ -1,5 +1,5 @@
 import {
-  authorizeV2,
+  authorizeEmailV2,
   getConversationResponse,
   isHeaderSafeText,
   isRecord,
@@ -13,7 +13,7 @@ export async function GET(
   request: Request,
   context: { params: Promise<{ conversationId: string }> },
 ) {
-  const unauthorized = authorizeV2(request);
+  const unauthorized = authorizeEmailV2(request);
   if (unauthorized) {
     return unauthorized;
   }
@@ -29,7 +29,7 @@ export async function PATCH(
   request: Request,
   context: { params: Promise<{ conversationId: string }> },
 ) {
-  const unauthorized = authorizeV2(request);
+  const unauthorized = authorizeEmailV2(request);
   if (unauthorized) {
     return unauthorized;
   }

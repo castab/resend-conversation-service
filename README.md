@@ -78,7 +78,7 @@ The health endpoint is available at both `/api/health/v2` and
 readiness checks. The webhook requires a valid signature over the exact raw
 body and all three Svix headers. V1 conversation operations require
 `CONVERSATION_API_KEY`; V2 conversation operations and direct email require the
-separate `CONVERSATION_V2_API_KEY`. Both outbox drain routes use
+separate `EMAIL_v2_API_KEY`. Both outbox drain routes use
 `OUTBOX_DRAIN_API_KEY`. Sending and enqueueing operations also require
 `Idempotency-Key`.
 
@@ -170,12 +170,12 @@ RESEND_WEBHOOK_SECRET=whsec_xxxxxxxxx
 RESEND_FROM=Mailbox <mailbox@example.com>
 RESEND_REPLY_TO=mailbox@replies.example.com
 CONVERSATION_API_KEY=replace-with-a-long-random-secret
-CONVERSATION_V2_API_KEY=replace-with-a-different-long-random-secret
+EMAIL_v2_API_KEY=replace-with-a-different-long-random-secret
 OUTBOX_DRAIN_API_KEY=replace-with-another-long-random-secret
 ```
 
 `RESEND_FROM`, `RESEND_REPLY_TO`, and `CONVERSATION_API_KEY` define the frozen
-V1 identity and credential. V2 callers use `CONVERSATION_V2_API_KEY` and select
+V1 identity and credential. V2 callers use `EMAIL_v2_API_KEY` and select
 only database-allowlisted identities in each request.
 
 Every Reply-To base, whether supplied by V1 configuration or a V2 caller, must
@@ -275,7 +275,7 @@ RESEND_API_BASE_URL=http://localhost:4010
 RESEND_FROM=Test Mailbox <mailbox@example.com>
 RESEND_REPLY_TO=mailbox@replies.example.com
 CONVERSATION_API_KEY=test-conversation-api-key
-CONVERSATION_V2_API_KEY=test-conversation-v2-api-key
+EMAIL_v2_API_KEY=test-conversation-v2-api-key
 OUTBOX_DRAIN_API_KEY=test-outbox-drain-api-key
 APP_BASE_URL=http://localhost:3000
 ```

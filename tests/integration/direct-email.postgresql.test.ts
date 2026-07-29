@@ -42,7 +42,7 @@ describe('Direct email API v2', () => {
     const missingKey = await fetch(baseUrl, {
       method: 'POST',
       headers: {
-        authorization: `Bearer ${TEST_CONFIG.conversationV2ApiKey}`,
+        authorization: `Bearer ${TEST_CONFIG.emailV2ApiKey}`,
         'content-type': 'application/json',
       },
       body: '{',
@@ -267,7 +267,7 @@ describe('Direct email API v2', () => {
 
   function headers(idempotencyKey: string) {
     return {
-      authorization: `Bearer ${TEST_CONFIG.conversationV2ApiKey}`,
+      authorization: `Bearer ${TEST_CONFIG.emailV2ApiKey}`,
       'content-type': 'application/json',
       'idempotency-key': idempotencyKey,
     };

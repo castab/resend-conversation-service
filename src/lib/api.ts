@@ -15,11 +15,11 @@ export function authorize(request: Request): Response | null {
   );
 }
 
-export function authorizeV2(request: Request): Response | null {
+export function authorizeEmailV2(request: Request): Response | null {
   return authorizeWithCredential(
     request,
-    process.env.CONVERSATION_V2_API_KEY,
-    'CONVERSATION_V2_API_KEY',
+    process.env.EMAIL_v2_API_KEY,
+    'EMAIL_v2_API_KEY',
   );
 }
 

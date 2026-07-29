@@ -1060,7 +1060,7 @@ function drainHeaders(): Record<string, string> {
 
 function v2Headers(idempotencyKey?: string): Record<string, string> {
   return {
-    authorization: `Bearer ${TEST_CONFIG.conversationV2ApiKey}`,
+    authorization: `Bearer ${TEST_CONFIG.emailV2ApiKey}`,
     'content-type': 'application/json',
     ...(idempotencyKey ? { 'idempotency-key': idempotencyKey } : {}),
   };

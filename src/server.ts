@@ -7,7 +7,7 @@ import express, {
   type RequestHandler,
 } from 'express';
 import swaggerUiDist from 'swagger-ui-dist';
-import { authorize, authorizeOutboxDrain, authorizeV2 } from '@/lib/api';
+import { authorize, authorizeEmailV2, authorizeOutboxDrain } from '@/lib/api';
 import { getPrismaClient } from '@/lib/database';
 import { POST as enqueueMessage } from '@/routes/conversations/v1/[conversationId]/messages/outbox/route';
 import { POST as sendMessage } from '@/routes/conversations/v1/[conversationId]/messages/route';
@@ -66,8 +66,8 @@ const requireConversationAuth: RequestHandler = (request, response, next) => {
   }
   next();
 };
-const requireConversationV2Auth: RequestHandler = (request, response, next) => {
-  const rejected = authorizeV2(authorizationRequest(request));
+const requireEmailV2Auth: RequestHandler = (request, response, next) => {
+  const rejected = authorizeEmailV2(authorizationRequest(request));
   if (rejected) {
     rejected.headers.forEach((value, name) => {
       response.setHeader(name, value);
@@ -145,7 +145,7 @@ export function createApp() {
   app.post('/api/webhooks/resend/v1', rawBody, adapt(webhook));
   app.post(
     '/api/emails/v2',
-    requireConversationV2Auth,
+    requireEmailV2Auth,
     requireIdempotency,
     rawBody,
     adapt(sendDirectEmailV2),
@@ -160,48 +160,48 @@ export function createApp() {
   );
   app.post(
     '/api/conversations/v2/outbox',
-    requireConversationV2Auth,
+    requireEmailV2Auth,
     requireIdempotency,
     rawBody,
     adapt(enqueueConversationV2),
   );
   app.all(
     '/api/conversations/v2/outbox',
-    requireConversationV2Auth,
+    requireEmailV2Auth,
     (_request, response) => response.status(404).json({ error: 'Not found' }),
   );
   app.get(
     '/api/conversations/v2/topics/:topicType/:externalTopicId',
-    requireConversationV2Auth,
+    requireEmailV2Auth,
     adapt(getConversationByTopicV2),
   );
   app
     .route('/api/conversations/v2')
-    .get(requireConversationV2Auth, adapt(listConversationsV2))
+    .get(requireEmailV2Auth, adapt(listConversationsV2))
     .post(
-      requireConversationV2Auth,
+      requireEmailV2Auth,
       requireIdempotency,
       rawBody,
       adapt(createConversationV2),
     );
   app.post(
     '/api/conversations/v2/:conversationId/messages/outbox',
-    requireConversationV2Auth,
+    requireEmailV2Auth,
     requireIdempotency,
     rawBody,
     adapt(enqueueMessageV2),
   );
   app.post(
     '/api/conversations/v2/:conversationId/messages',
-    requireConversationV2Auth,
+    requireEmailV2Auth,
     requireIdempotency,
     rawBody,
     adapt(sendMessageV2),
   );
   app
     .route('/api/conversations/v2/:conversationId')
-    .get(requireConversationV2Auth, adapt(getConversationV2))
-    .patch(requireConversationV2Auth, rawBody, adapt(patchConversationV2));
+    .get(requireEmailV2Auth, adapt(getConversationV2))
+    .patch(requireEmailV2Auth, rawBody, adapt(patchConversationV2));
 
   app.post(
     '/api/conversations/v1/outbox/drain',

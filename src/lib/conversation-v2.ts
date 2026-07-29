@@ -1,5 +1,5 @@
 import {
-  authorizeV2,
+  authorizeEmailV2,
   isUuid,
   readJson,
   sendResultResponse,
@@ -63,7 +63,7 @@ function getIdempotencyKey(request: Request): string | Response {
 }
 
 export async function createConversationV2(request: Request, queued: boolean) {
-  const unauthorized = authorizeV2(request);
+  const unauthorized = authorizeEmailV2(request);
   if (unauthorized) {
     return unauthorized;
   }
@@ -363,7 +363,7 @@ export async function createMessageV2(
   context: { params: Promise<{ conversationId: string }> },
   queued: boolean,
 ) {
-  const unauthorized = authorizeV2(request);
+  const unauthorized = authorizeEmailV2(request);
   if (unauthorized) {
     return unauthorized;
   }

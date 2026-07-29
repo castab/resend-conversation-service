@@ -18,7 +18,7 @@ Use the upstream `openapi.json`, consumer guide, release notes, and versioned se
 
 | Scope | Credential |
 | --- | --- |
-| Conversation V2 and direct email | `Authorization: Bearer <CONVERSATION_V2_API_KEY>` |
+| Conversation V2 and direct email | `Authorization: Bearer <EMAIL_v2_API_KEY>` |
 | Deprecated conversation V1 | `Authorization: Bearer <CONVERSATION_API_KEY>` |
 | Either outbox drain path | `Authorization: Bearer <OUTBOX_DRAIN_API_KEY>` |
 | Resend webhook | Exact-body `svix-id`, `svix-timestamp`, `svix-signature` |
