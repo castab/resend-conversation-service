@@ -3,7 +3,7 @@
   "info": {
     "title": "resend-service API",
     "version": "0.3.1",
-    "description": "Receives signed Resend webhooks and provides bearer-authenticated topic-centered conversations plus synchronous direct email. Conversation API v2 is current; conversation API v1 remains available as a deprecated, frozen compatibility surface with no announced sunset. The service persists outbound intent before contacting Resend, preserves RFC reply relationships for conversations, and stores untrusted email content without retrieving attachments.",
+    "description": "Receives signed Resend webhooks and provides bearer-authenticated topic-centered conversations plus synchronous and queued direct email. Conversation API v2 is current; conversation API v1 remains available as a deprecated, frozen compatibility surface with no announced sunset. The service persists outbound intent before contacting Resend, preserves RFC reply relationships for conversations, and stores untrusted email content without retrieving attachments.",
     "license": {
       "name": "MIT",
       "identifier": "MIT"
@@ -35,7 +35,7 @@
     },
     {
       "name": "Direct email",
-      "description": "Synchronously send email without a conversation or Reply-To header"
+      "description": "Synchronously send or enqueue email without a conversation or Reply-To header"
     },
     {
       "name": "Operations",
@@ -594,7 +594,7 @@
         "operationId": "drainConversationOutbox",
         "deprecated": true,
         "summary": "Deliver one outbox batch",
-        "description": "Deprecated V1 route mirror with no announced sunset for the shared drain operation. Claims or reclaims one persistent batch containing V1 and/or V2 intents and makes at most one bounded Resend batch request. It remains protected by the dedicated drain credential. Transient failures retain exact ordered membership for a later idempotent retry.",
+        "description": "Deprecated V1 route mirror with no announced sunset for the shared drain operation. Claims or reclaims one persistent batch containing direct, V1 conversation, and/or V2 conversation intent and makes at most one bounded Resend batch request. It remains protected by the dedicated drain credential. Transient failures retain exact ordered membership for a later idempotent retry.",
         "tags": ["Outbox"],
         "security": [
           {
@@ -1335,6 +1335,121 @@
         }
       }
     },
+    "/api/emails/v2/outbox": {
+      "post": {
+        "operationId": "enqueueDirectEmailV2",
+        "summary": "Enqueue a direct email without a conversation",
+        "description": "Atomically persists a pending direct email and shared outbox entry without calling Resend. Validation, multiple-recipient support, tags, exact FROM authorization, and Reply-To rejection match the synchronous direct-email operation. Later allowlist removal does not cancel already-persisted intent. Replaying the same key and normalized queued request returns 202 while pending, 200 after acceptance, or 502 after a failed or indeterminate drain outcome.",
+        "tags": ["Direct email", "Outbox"],
+        "security": [{ "emailV2Auth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/DirectEmailV2Request" },
+              "example": {
+                "from": {
+                  "address": "notifications@example.com",
+                  "name": "Example"
+                },
+                "to": [
+                  {
+                    "address": "person@example.com",
+                    "name": "Person"
+                  }
+                ],
+                "subject": "Verify your email",
+                "html": "<p>Use the verification link.</p>",
+                "tags": [{ "name": "category", "value": "verification" }]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "A matching queued request was already accepted by Resend.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectEmailSendResult"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The direct email is durably queued and remains pending.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectEmailSendResult"
+                },
+                "example": {
+                  "email": {
+                    "id": "0198409b-7c01-7def-8ad2-8b94ad8e8987",
+                    "state": "pending",
+                    "resendEmailId": null
+                  }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "413": { "$ref": "#/components/responses/PayloadTooLarge" },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedContentEncoding"
+          },
+          "500": { "$ref": "#/components/responses/ServerError" },
+          "502": {
+            "description": "The queued email was later marked failed or indeterminate.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectEmailSendFailure"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/emails/v2/outbox/drain": {
+      "post": {
+        "operationId": "drainEmailOutboxV2",
+        "summary": "Deliver one shared outbox batch",
+        "description": "Email-namespaced alias for the shared outbox drain. It uses only OUTBOX_DRAIN_API_KEY and may deliver direct, V1 conversation, and V2 conversation messages in one fixed ordered batch. Operators should schedule one drain alias rather than invoke every alias.",
+        "tags": ["Outbox"],
+        "security": [{ "outboxDrainAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/DrainOutboxRequest" },
+              "example": { "limit": 100 }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The bounded shared drain invocation completed, including persisted retry scheduling when applicable.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DrainOutboxResult" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "413": { "$ref": "#/components/responses/PayloadTooLarge" },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedContentEncoding"
+          },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
     "/api/conversations/v2": {
       "post": {
         "operationId": "createConversationV2",
@@ -1553,7 +1668,7 @@
       "post": {
         "operationId": "drainConversationOutboxV2",
         "summary": "Deliver one shared outbox batch",
-        "description": "V2 route mirror for the shared outbox drain. It uses only the dedicated drain credential, not either conversation API credential, and may deliver queued V1 and V2 messages from the same persisted outbox.",
+        "description": "Conversation V2 route mirror for the shared outbox drain. It uses only the dedicated drain credential and may deliver direct, V1 conversation, and V2 conversation messages from the same persisted outbox.",
         "tags": ["Outbox"],
         "security": [{ "outboxDrainAuth": [] }],
         "requestBody": {

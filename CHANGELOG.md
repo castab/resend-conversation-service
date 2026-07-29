@@ -7,6 +7,12 @@ Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Added `POST /api/emails/v2/outbox` for durable asynchronous direct email and
+  `POST /api/emails/v2/outbox/drain` as an alias of the shared direct and
+  conversation outbox drain.
+
 ## [0.3.1] - 2026-07-28
 
 ### Changed

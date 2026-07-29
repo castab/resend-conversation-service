@@ -9,7 +9,9 @@ Use the upstream `openapi.json`, consumer guide, release notes, and versioned se
 ## Version selection
 
 - Build new conversation integrations against `/api/conversations/v2`.
-- Use `POST /api/emails/v2` for synchronous email that must not create a conversation.
+- Use `POST /api/emails/v2` for synchronous direct email and
+  `POST /api/emails/v2/outbox` for queued direct email. Neither creates a
+  conversation.
 - Treat `/api/conversations/v1` as deprecated and frozen. It has no announced sunset.
 - V1 uses server-configured `RESEND_FROM` and `RESEND_REPLY_TO`; callers cannot select identities.
 - V2 requires explicit structured identities on every send and enqueue request.
@@ -20,7 +22,7 @@ Use the upstream `openapi.json`, consumer guide, release notes, and versioned se
 | --- | --- |
 | Conversation V2 and direct email | `Authorization: Bearer <EMAIL_v2_API_KEY>` |
 | Deprecated conversation V1 | `Authorization: Bearer <CONVERSATION_API_KEY>` |
-| Either outbox drain path | `Authorization: Bearer <OUTBOX_DRAIN_API_KEY>` |
+| Any shared outbox drain alias | `Authorization: Bearer <OUTBOX_DRAIN_API_KEY>` |
 | Resend webhook | Exact-body `svix-id`, `svix-timestamp`, `svix-signature` |
 
 Credentials are not interchangeable and are never browser-safe.
@@ -48,7 +50,7 @@ For opening send/enqueue operations, put identities under `message`:
 
 For existing-conversation send/enqueue operations, put `from`, `replyTo`, and optional `to` and `tags` at the request top level. `address` is required and `name` is optional. Do not send V1 `replyToName` fields to V2.
 
-For direct email, send structured `from`, one structured `to` identity or a nonempty `to` identity array, `subject`, and at least one of `text` or `html` to `POST /api/emails/v2`. Optional `tags` are forwarded to Resend. Do not send `replyTo`; the endpoint emits neither Reply-To nor threading headers. Only the normalized From address is allowlisted. A mail client can still direct a reply to the From mailbox.
+For direct email, send structured `from`, one structured `to` identity or a nonempty `to` identity array, `subject`, and at least one of `text` or `html` to the synchronous or outbox route. Optional `tags` are forwarded to Resend. Do not send `replyTo`; neither route emits Reply-To or threading headers. Only the normalized From address is allowlisted. A mail client can still direct a reply to the From mailbox.
 
 V2 `to` supports up to 50 recipients. Conversation `to` recipients are outbound-only and do not replace the single conversation participant; when omitted, conversation sends target the participant. V2 tags are limited to 10 nonblank `{name,value}` pairs with each string at most 256 characters.
 
@@ -68,7 +70,9 @@ V2 mirrors the complete V1 conversation layout:
 
 | Method | V2 path | Purpose |
 | --- | --- | --- |
-| `POST` | `/api/emails/v2` | Send one direct email without conversation, outbox, Reply-To, or threading headers |
+| `POST` | `/api/emails/v2` | Synchronously send direct email without conversation, Reply-To, or threading headers |
+| `POST` | `/api/emails/v2/outbox` | Persist and enqueue direct email in the shared outbox |
+| `POST` | `/api/emails/v2/outbox/drain` | Preferred alias for draining one shared direct/conversation batch |
 | `POST`, `GET` | `/api/conversations/v2` | Create/send; list unassigned with `assignment=unassigned` |
 | `POST` | `/api/conversations/v2/outbox` | Enqueue opening message; pending idempotent replay also returns `202` |
 | `POST` | `/api/conversations/v2/outbox/drain` | Drain shared outbox with dedicated credential |
@@ -85,14 +89,16 @@ V2 mirrors the complete V1 conversation layout:
 2. Every send/enqueue operation requires a stable `Idempotency-Key` of at most 256 characters.
 3. Keys are retained indefinitely and globally unique across versions and send modes.
 4. Direct email requires structured `from` and `to`, exact `FROM` authorization, a subject, and `text` or `html`; `to` may be one identity or an array, and recipients are not authorized.
-5. The first conversation outbound intent fixes the Reply-To base. The service appends and preserves `+c_<32 lowercase hex routing token>`.
-6. Later V2 conversation requests must submit that same untagged base even when another base is allowlisted.
-7. Allowlist revocation blocks new intent but does not mutate or block already-persisted intent.
-8. Conversation replies require a parent in the same conversation and never send without a parent RFC `Message-ID`.
-9. `References` preserves the selected parent's ancestry.
-10. Returned HTML is untrusted.
-11. `accepted` is provider API acceptance, not final delivery. Direct email has no read endpoint for later projected delivery state.
-12. Out-of-order row reconciliation preserves one-way V2 promotion and historical routing-token/base aliases when conversations merge.
+5. Direct synchronous and queued operations use distinct idempotency modes. A queued replay never sends synchronously.
+6. Direct and conversation intent share global outbox ordering, fixed batches, retries, capacity, and batch-level terminal outcomes.
+7. The first conversation outbound intent fixes the Reply-To base. The service appends and preserves `+c_<32 lowercase hex routing token>`.
+8. Later V2 conversation requests must submit that same untagged base even when another base is allowlisted.
+9. Allowlist revocation blocks new intent but does not mutate or block already-persisted intent.
+10. Conversation replies require a parent in the same conversation and never send without a parent RFC `Message-ID`.
+11. `References` preserves the selected parent's ancestry.
+12. Returned HTML is untrusted.
+13. `accepted` is provider API acceptance, not final delivery. Direct email has no read endpoint for later projected delivery state.
+14. Out-of-order row reconciliation preserves one-way V2 promotion and historical routing-token/base aliases when conversations merge.
 
 ## Promotion
 
@@ -118,14 +124,15 @@ V2 mirrors the complete V1 conversation layout:
 ## Integration checklist
 
 1. Select V2 and store the V2 credential separately from V1 and drain credentials.
-2. Choose `/api/emails/v2` only when the send needs no conversation, Reply-To, outbox, or later service read.
+2. Choose `/api/emails/v2` or `/api/emails/v2/outbox` when the send needs no conversation, Reply-To, or later service read.
 3. Provision exact lowercase `FROM` and `REPLY_TO` allowlist rows for conversations; direct email needs only `FROM`.
 4. Keep the base `replyTo.address` stable for every conversation; never send the generated tagged address back as input.
 5. Persist one idempotency key per logical send or enqueue and reuse it on retries.
 6. Handle `200`, `201`, and `202` as state-bearing success responses.
-7. Reconcile `502` using the same key; do not create a replacement direct send with a new key.
-8. Sanitize response HTML.
-9. Validate request and response models against upstream OpenAPI contract `0.3.1`.
+7. Reconcile queued direct state by replaying the enqueue operation with the same key and normalized request; do not create a replacement send with a new key.
+8. Schedule exactly one shared drain alias with the dedicated credential; prefer `/api/emails/v2/outbox/drain` for new integrations.
+9. Sanitize response HTML.
+10. Validate request and response models against upstream OpenAPI contract `0.3.1`.
 
 ## Known concerns
 

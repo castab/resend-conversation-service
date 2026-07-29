@@ -4,7 +4,7 @@ Contract version: `0.3.1`
 
 ## Service purpose
 
-`resend-service` owns topic-centered email conversations for one external participant per conversation and supports synchronous direct email that is not attached to a conversation. It persists outbound send intent before contacting Resend, projects inbound and delivery webhooks, and preserves parent relationships plus RFC `Message-ID` ancestry for conversations.
+`resend-service` owns topic-centered email conversations for one external participant per conversation and supports synchronous and queued direct email that is not attached to a conversation. It persists outbound send intent before contacting Resend, projects inbound and delivery webhooks, and preserves parent relationships plus RFC `Message-ID` ancestry for conversations.
 
 The service is authoritative for:
 
@@ -13,14 +13,14 @@ The service is authoritative for:
 - Message threading, send state, and outbound delivery state
 - Idempotent synchronous and outbox send intent
 - Stable per-conversation Reply-To routing
-- Idempotent direct-email acceptance without conversation threading
+- Idempotent synchronous and queued direct-email acceptance without conversation threading
 - Signed Resend webhook ingestion and inbound projection
 
 The service does not provide browser authentication, contact management, attachment retrieval, allowlist administration, or a general engagement analytics API. Returned HTML is untrusted and must be sanitized before browser rendering.
 
 ## Version choice
 
-Use conversation API V2 for new conversation integrations. V2 is available under `/api/conversations/v2` and requires explicit authorized sender and Reply-To identities. Use `POST /api/emails/v2` for synchronous notification or system email that does not need a conversation.
+Use conversation API V2 for new conversation integrations. V2 is available under `/api/conversations/v2` and requires explicit authorized sender and Reply-To identities. Use `POST /api/emails/v2` or `POST /api/emails/v2/outbox` for synchronous or queued notification and system email that does not need a conversation.
 
 Conversation API V1 remains available under `/api/conversations/v1` as a deprecated, frozen compatibility contract. There is no announced sunset. V1 continues to use only the server-configured `RESEND_FROM` and `RESEND_REPLY_TO`; callers cannot select V1 identities. New features belong in V2.
 
@@ -40,7 +40,7 @@ remains V1.
   are nonempty.
 - Missing or invalid credentials return `401` with `WWW-Authenticate: Bearer`.
 - Missing server-side credential configuration returns `500 {"error":"Server misconfiguration"}`.
-- The same credential authorizes `POST /api/emails/v2`.
+- The same credential authorizes both direct-email routes.
 
 ### Deprecated conversation API V1
 
@@ -52,7 +52,7 @@ remains V1.
 
 - Send `Authorization: Bearer <OUTBOX_DRAIN_API_KEY>`.
 - Neither conversation credential is accepted.
-- Both `/api/conversations/v1/outbox/drain` and `/api/conversations/v2/outbox/drain` invoke the same shared drain behavior and use this dedicated credential.
+- `/api/emails/v2/outbox/drain` and both versioned conversation drain paths invoke the same shared behavior and use this dedicated credential.
 
 ### Webhooks
 
@@ -124,6 +124,8 @@ When a V1 conversation is promoted, its existing persisted `RESEND_REPLY_TO` bas
 | Method | Path | Purpose | Success | Main errors |
 | --- | --- | --- | --- | --- |
 | `POST` | `/api/emails/v2` | Synchronously send one email without a conversation or Reply-To header | `201`, replay `200`/`202` | `400`, `401`, `409`, `413`, `415`, `500`, `502` |
+| `POST` | `/api/emails/v2/outbox` | Persist and enqueue direct email without a conversation | `202`, replay `200`/`202` | `400`, `401`, `409`, `413`, `415`, `500`, `502` |
+| `POST` | `/api/emails/v2/outbox/drain` | Deliver one shared direct/conversation outbox batch | `200` | `400`, `401`, `413`, `415`, `500` |
 | `POST` | `/api/conversations/v2` | Create and synchronously send an opening message | `201`, replay `200`/`202` | `400`, `401`, `409`, `413`, `415`, `500`, `502` |
 | `GET` | `/api/conversations/v2?assignment=unassigned` | List unassigned inbound conversations | `200` | `400`, `401`, `500` |
 | `POST` | `/api/conversations/v2/outbox` | Persist and enqueue an opening message | `202`, replay `200`/`202` | `400`, `401`, `409`, `413`, `415`, `500`, `502` |
@@ -168,7 +170,7 @@ Send `POST /api/emails/v2` with a globally unique `Idempotency-Key`:
 }
 ```
 
-At least one recipient and a subject are required, and at least one of `text` or `html` must be nonempty. `to` may remain the legacy single identity object or may be an array of up to 50 identities. Optional `tags` are forwarded to Resend and are limited to 10 nonblank `{name,value}` pairs. `replyTo` is rejected. The service creates no conversation, parent, routing token, outbox entry, Reply-To header, or RFC threading headers. Because standard mail clients fall back to the From mailbox when Reply-To is absent, select an appropriate monitored or no-reply From identity.
+At least one recipient and a subject are required, and at least one of `text` or `html` must be nonempty. `to` may remain the legacy single identity object or may be an array of up to 50 identities. Optional `tags` are forwarded to Resend and are limited to 10 nonblank `{name,value}` pairs. `replyTo` is rejected. Direct email creates no conversation, parent, routing token, Reply-To header, or RFC threading headers. The synchronous route creates no outbox entry; the queued route atomically creates one. Because standard mail clients fall back to the From mailbox when Reply-To is absent, select an appropriate monitored or no-reply From identity.
 
 New provider acceptance returns `201`:
 
@@ -182,7 +184,9 @@ New provider acceptance returns `201`:
 }
 ```
 
-There is no V1 or outbox equivalent and no direct-email GET operation. Lifecycle webhooks continue to update the persisted direct intent, but that later delivery state is not exposed by this endpoint.
+Use `POST /api/emails/v2/outbox` with the same body and a different globally unique idempotency key to queue delivery. A new enqueue returns `202` with `state: "pending"` and `resendEmailId: null` without calling Resend. Replay the same normalized queued request and key to reconcile state: pending remains `202`, accepted returns `200`, and failed or indeterminate returns `502`. A synchronous and queued request cannot share one idempotency key.
+
+There is no V1 or direct-email GET operation. Lifecycle webhooks continue to update persisted direct intent, but later delivery state is not exposed by a read endpoint.
 
 ## V2 workflows
 
@@ -277,9 +281,9 @@ A V2 reply to a V1 conversation atomically promotes the conversation when the se
 
 ### Enqueue and drain
 
-Use `POST /api/conversations/v2/outbox` for an opening message or `POST /api/conversations/v2/{conversationId}/messages/outbox` for a reply. Request bodies match the corresponding V2 synchronous operation.
+Use `POST /api/emails/v2/outbox` for direct email, `POST /api/conversations/v2/outbox` for an opening message, or `POST /api/conversations/v2/{conversationId}/messages/outbox` for a reply. Request bodies match the corresponding synchronous operation.
 
-Enqueue returns `202` after atomically persisting the conversation/message changes and outbox entry. An idempotent replay also returns `202` while that stored message remains pending; it returns `200` after acceptance or `502` after a failed or indeterminate outcome. A trusted scheduler then calls either versioned drain route with the dedicated drain credential:
+Enqueue returns `202` after atomically persisting intent and its outbox entry. An idempotent replay also returns `202` while that stored message remains pending; it returns `200` after acceptance or `502` after a failed or indeterminate outcome. A trusted scheduler calls one shared drain alias with the dedicated drain credential:
 
 ```json
 {
@@ -287,7 +291,7 @@ Enqueue returns `202` after atomically persisting the conversation/message chang
 }
 ```
 
-The drain processes at most one persistent batch per request. V1 and V2 intents share the outbox. A drain response can return `200` while reporting failed, retried, or indeterminate item state.
+The preferred scheduler path is `POST /api/emails/v2/outbox/drain`. The V1 and V2 conversation drain paths remain equivalent aliases. The drain processes at most one persistent batch per request. Direct, V1 conversation, and V2 conversation intent share global ordering and may occupy one fixed batch, including shared retry and batch-level terminal outcomes. A drain response can return `200` while reporting failed, retried, or indeterminate item state. Schedule one alias, not all aliases.
 
 ### Read and assign
 

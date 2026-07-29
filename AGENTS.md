@@ -62,16 +62,22 @@
 
 ## Direct Email API
 
-- Keep direct email exactly `POST /api/emails/v2`; do not add a V1 or outbox
-  equivalent.
+- Keep direct email V2-only at `POST /api/emails/v2` and
+  `POST /api/emails/v2/outbox`; do not add a V1 equivalent.
 - Require `EMAIL_v2_API_KEY`, `Idempotency-Key`, structured caller-supplied
-  `from` and singular `to` identities, a subject, and at least one body format.
+  `from` and one-or-more `to` identities, a subject, and at least one body
+  format.
 - Authorize only the canonical From address with an exact `FROM` allowlist row.
   Do not allowlist recipients.
 - Reject `replyTo` and do not create a conversation, parent, routing token,
   Reply-To header, or RFC threading headers.
 - Persist direct intent before Resend and keep it separate from conversation
   projection while preserving global message idempotency and delivery events.
+- Atomically persist queued direct intent with its outbox entry. Replaying a
+  queued operation must never invoke synchronous pending-message recovery.
+- Keep `POST /api/emails/v2/outbox/drain` as an alias of the shared drain using
+  `OUTBOX_DRAIN_API_KEY`. Direct and conversation intent may share one ordered
+  batch and its retry or terminal outcome.
 
 ## Database
 
