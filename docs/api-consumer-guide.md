@@ -1,6 +1,6 @@
 # API Consumer Guide
 
-Contract version: `0.3.1`
+Contract version: `0.4.0`
 
 ## Service purpose
 
@@ -473,7 +473,7 @@ curl -i \
 
 - Current conversation API: V2; deprecated frozen compatibility API: V1 with no announced sunset.
 - OpenAPI version: `3.1.1`.
-- Contract/package version observed in repository: `0.3.1`.
+- Contract/package version observed in repository: `0.4.0`.
 - No browser-safe authentication or correlation/request ID is defined.
 - Gateway exposure policy is deployment-owned and not included in this contract.
 - Topic lookup does not enforce the documented 255-character `externalTopicId` limit although create and assignment do; consumers must follow the stricter contract.

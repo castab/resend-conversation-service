@@ -1,6 +1,6 @@
 # API Agent Handoff
 
-Contract version: `0.3.1`
+Contract version: `0.4.0`
 
 ## Sources
 
@@ -132,7 +132,7 @@ V2 mirrors the complete V1 conversation layout:
 7. Reconcile queued direct state by replaying the enqueue operation with the same key and normalized request; do not create a replacement send with a new key.
 8. Schedule exactly one shared drain route with the dedicated credential. Use `/api/emails/v2/outbox/drain`; both conversation-namespaced drain paths are deprecated compatibility aliases.
 9. Sanitize response HTML.
-10. Validate request and response models against upstream OpenAPI contract `0.3.1`.
+10. Validate request and response models against upstream OpenAPI contract `0.4.0`.
 
 ## Known concerns
 
