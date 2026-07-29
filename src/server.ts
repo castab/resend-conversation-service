@@ -35,7 +35,8 @@ import {
   GET as listConversationsV2,
 } from '@/routes/conversations/v2/route';
 import { GET as getConversationByTopicV2 } from '@/routes/conversations/v2/topics/[topicType]/[externalTopicId]/route';
-import { GET as health } from '@/routes/health/v1/route';
+import { GET as healthV1 } from '@/routes/health/v1/route';
+import { GET as healthV2 } from '@/routes/health/v2/route';
 import { POST as webhook } from '@/routes/webhooks/resend/v1/route';
 
 const BODY_LIMIT = '2100kb';
@@ -138,7 +139,8 @@ export function createApp() {
   const app = express();
   app.disable('x-powered-by');
 
-  app.get('/api/health/v1', adapt(health));
+  app.get('/api/health/v1', adapt(healthV1));
+  app.get('/api/health/v2', adapt(healthV2));
   app.post('/api/webhooks/resend/v1', rawBody, adapt(webhook));
 
   // Static conversation routes must precede /:conversationId routes.

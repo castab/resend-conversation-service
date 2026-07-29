@@ -45,6 +45,7 @@ railway.json            # Railway build and deployment configuration
 ## API Routes
 
 ```text
+GET   /api/health/v2
 GET   /api/health/v1
 POST  /api/webhooks/resend/v1
 POST  /api/conversations/v1
@@ -69,13 +70,18 @@ GET   /docs
 GET   /openapi.json
 ```
 
-The webhook requires a valid signature over the exact raw body and all three
-Svix headers. V1 conversation operations require `CONVERSATION_API_KEY`; V2
-conversation operations require the separate `CONVERSATION_V2_API_KEY`. Both
-outbox drain routes use `OUTBOX_DRAIN_API_KEY`. Sending and enqueueing
-operations also require `Idempotency-Key`.
+The health endpoint is available at both `/api/health/v2` and
+`/api/health/v1`; `v1` remains as a compatibility alias for deployment
+readiness checks. The webhook requires a valid signature over the exact raw
+body and all three Svix headers. V1 conversation operations require
+`CONVERSATION_API_KEY`; V2 conversation operations require the separate
+`CONVERSATION_V2_API_KEY`. Both outbox drain routes use
+`OUTBOX_DRAIN_API_KEY`. Sending and enqueueing operations also require
+`Idempotency-Key`.
 
-The former `/api/webhooks/v1/resend` path remains intentionally unavailable.
+`POST /api/webhooks/resend/v1` remains the supported long-term Resend webhook
+ingress. Unlike the frozen legacy conversation API, this webhook path is not
+part of a V1-to-V2 migration and will remain active for the foreseeable future.
 
 ### API versions
 
@@ -283,7 +289,10 @@ docker run --rm -p 3000:3000 --env-file .env resend-service
 ```
 
 The image contains Prisma migration tooling, schema, migrations, public assets,
-and the standalone Express server.
+and the standalone Express server. When started with the default
+`node dist/server.js` command, the container now fails fast if required runtime
+environment variables are missing or if `RESEND_REPLY_TO` is not a valid
+untagged base mailbox address.
 
 Published releases are also available on Docker Hub as
 `castab/resend-service`.
@@ -318,8 +327,9 @@ Detailed release steps live in `docs/releasing.md`.
 ## Railway
 
 Create one service from this repository and use `/railway.json`. Configure all
-runtime variables before deployment because `/api/health/v1` checks the complete
-configuration. The pre-deploy command applies pending Prisma migrations.
+runtime variables before deployment because `/api/health/v2` and the retained
+`/api/health/v1` alias both check the complete configuration. The pre-deploy
+command applies pending Prisma migrations.
 
 Route public and private traffic through the API gateway as needed. Keep bearer
 authentication enabled even when conversation routes are gateway-restricted.

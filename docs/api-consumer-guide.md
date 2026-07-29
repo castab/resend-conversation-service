@@ -23,7 +23,10 @@ Use conversation API V2 for new integrations. V2 is available under `/api/conver
 
 Conversation API V1 remains available under `/api/conversations/v1` as a deprecated, frozen compatibility contract. There is no announced sunset. V1 continues to use only the server-configured `RESEND_FROM` and `RESEND_REPLY_TO`; callers cannot select V1 identities. New features belong in V2.
 
-The health route remains V1 because it is an independent readiness contract. Resend webhook ingress also remains V1.
+The health route is available at both `/api/health/v2` and `/api/health/v1`.
+`/api/health/v2` is the current path; `/api/health/v1` remains as a
+compatibility alias for existing readiness checks. Resend webhook ingress
+remains V1.
 
 ## Authentication
 

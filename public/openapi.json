@@ -43,11 +43,51 @@
     }
   ],
   "paths": {
+    "/api/health/v2": {
+      "get": {
+        "operationId": "getHealthV2",
+        "summary": "Check service readiness",
+        "description": "Checks configuration for every webhook, conversation, and outbox capability plus PostgreSQL connectivity without returning sensitive details.",
+        "tags": ["Operations"],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The service is ready.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                },
+                "example": {
+                  "status": "ok"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "503": {
+            "description": "Required configuration or PostgreSQL is unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                },
+                "example": {
+                  "status": "unhealthy"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/health/v1": {
       "get": {
         "operationId": "getHealth",
         "summary": "Check service readiness",
-        "description": "Checks configuration for every webhook, conversation, and outbox capability plus PostgreSQL connectivity without returning sensitive details.",
+        "description": "Compatibility alias for `/api/health/v2`. Checks configuration for every webhook, conversation, and outbox capability plus PostgreSQL connectivity without returning sensitive details.",
         "tags": ["Operations"],
         "security": [],
         "responses": {

@@ -64,7 +64,7 @@ V2 mirrors the complete V1 conversation layout:
 | `POST` | `/api/conversations/v2/{conversationId}/messages/outbox` | Enqueue reply; pending idempotent replay also returns `202` |
 | `GET` | `/api/conversations/v2/topics/{topicType}/{externalTopicId}` | Read by topic |
 
-`GET /api/health/v1` is unauthenticated. `POST /api/webhooks/resend/v1` is Svix-authenticated.
+`GET /api/health/v2` and `GET /api/health/v1` are both unauthenticated and have identical readiness behavior. `POST /api/webhooks/resend/v1` is Svix-authenticated.
 
 ## Critical invariants
 
