@@ -34,14 +34,21 @@ For opening send/enqueue operations, put identities under `message`:
   "message": {
     "text": "Opening message",
     "from": { "address": "booking@mail.example.com", "name": "Booking Team" },
-    "replyTo": { "address": "booking-replies@mail.example.com", "name": "Booking Team" }
+    "to": [
+      { "address": "person@example.com", "name": "Person" },
+      { "address": "backup@example.com", "name": "Backup Person" }
+    ],
+    "replyTo": { "address": "booking-replies@mail.example.com", "name": "Booking Team" },
+    "tags": [{ "name": "category", "value": "booking_update" }]
   }
 }
 ```
 
-For existing-conversation send/enqueue operations, put `from` and `replyTo` at the request top level. `address` is required and `name` is optional. Do not send V1 `replyToName` fields to V2.
+For existing-conversation send/enqueue operations, put `from`, `replyTo`, and optional `to` and `tags` at the request top level. `address` is required and `name` is optional. Do not send V1 `replyToName` fields to V2.
 
-For direct email, send structured `from` and singular `to` identities plus `subject` and at least one of `text` or `html` to `POST /api/emails/v2`. Do not send `replyTo`; the endpoint emits neither Reply-To nor threading headers. Only the normalized From address is allowlisted. A mail client can still direct a reply to the From mailbox.
+For direct email, send structured `from`, one structured `to` identity or a nonempty `to` identity array, `subject`, and at least one of `text` or `html` to `POST /api/emails/v2`. Optional `tags` are forwarded to Resend. Do not send `replyTo`; the endpoint emits neither Reply-To nor threading headers. Only the normalized From address is allowlisted. A mail client can still direct a reply to the From mailbox.
+
+V2 `to` supports up to 50 recipients. Conversation `to` recipients are outbound-only and do not replace the single conversation participant; when omitted, conversation sends target the participant. V2 tags are limited to 10 nonblank `{name,value}` pairs with each string at most 256 characters.
 
 Addresses containing whitespace are invalid; accepted addresses are normalized to lowercase. The database must contain an exact `(address, FROM)` row for `from.address` and an exact `(address, REPLY_TO)` row for `replyTo.address`. Roles are not interchangeable; wildcard, domain, alias, and display-name authorization do not exist. Allowlist administration is database-only.
 
@@ -75,7 +82,7 @@ V2 mirrors the complete V1 conversation layout:
 1. One conversation exists per `(topicType, externalTopicId)` and has one external participant.
 2. Every send/enqueue operation requires a stable `Idempotency-Key` of at most 256 characters.
 3. Keys are retained indefinitely and globally unique across versions and send modes.
-4. Direct email requires structured `from` and `to`, exact `FROM` authorization, a subject, and `text` or `html`; it rejects `replyTo` and does not authorize recipients.
+4. Direct email requires structured `from` and `to`, exact `FROM` authorization, a subject, and `text` or `html`; `to` may be one identity or an array, and recipients are not authorized.
 5. The first conversation outbound intent fixes the Reply-To base. The service appends and preserves `+c_<32 lowercase hex routing token>`.
 6. Later V2 conversation requests must submit that same untagged base even when another base is allowlisted.
 7. Allowlist revocation blocks new intent but does not mutate or block already-persisted intent.

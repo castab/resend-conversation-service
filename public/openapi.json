@@ -1244,7 +1244,7 @@
       "post": {
         "operationId": "sendDirectEmailV2",
         "summary": "Send a direct email without a conversation",
-        "description": "Persists a direct outbound email intent and synchronously sends it through Resend. The normalized from.address must exactly match a FROM allowlist entry; the singular recipient is not allowlisted. No conversation, parent, routing token, Reply-To header, or RFC threading headers are created. Without a Reply-To header, mail clients normally direct replies to the From address.",
+        "description": "Persists a direct outbound email intent and synchronously sends it through Resend. The normalized from.address must exactly match a FROM allowlist entry; recipients are not allowlisted. No conversation, parent, routing token, Reply-To header, or RFC threading headers are created. Without a Reply-To header, mail clients normally direct replies to the From address.",
         "tags": ["Direct email"],
         "security": [{ "emailV2Auth": [] }],
         "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
@@ -1258,13 +1258,20 @@
                   "address": "notifications@example.com",
                   "name": "Example"
                 },
-                "to": {
-                  "address": "person@example.com",
-                  "name": "Person"
-                },
+                "to": [
+                  {
+                    "address": "person@example.com",
+                    "name": "Person"
+                  },
+                  {
+                    "address": "second@example.com",
+                    "name": "Second Person"
+                  }
+                ],
                 "subject": "Verify your email",
                 "text": "Use the verification link.",
-                "html": "<p>Use the verification link.</p>"
+                "html": "<p>Use the verification link.</p>",
+                "tags": [{ "name": "category", "value": "confirm_email" }]
               }
             }
           }
@@ -1332,7 +1339,7 @@
       "post": {
         "operationId": "createConversationV2",
         "summary": "Start a topic conversation with explicit identities",
-        "description": "Creates the single conversation for an external topic and sends its opening email. message.from and message.replyTo are required structured identities. Their normalized addresses must have exact allowlist rows for the FROM and REPLY_TO roles respectively. The Reply-To address must be an untagged base address; the service persists it for the conversation and sends from base-local+c_<32 lowercase hex routing token>@domain. Identity or fixed-base rejection uses one generic 400 response. A failed V1 topic conversation may be reopened and promoted to V2 when all prior messages are failed and its persisted Reply-To base is absent or equals the requested base. Promotion occurs when the V2 intent is successfully persisted, before the provider call, so a subsequent 502 does not undo it.",
+        "description": "Creates the single conversation for an external topic and sends its opening email. message.from and message.replyTo are required structured identities. Optional message.to recipients override the outbound recipient list but do not change the single conversation participant; when omitted, the email is sent to participant. Optional message.tags are forwarded to Resend. From and Reply-To normalized addresses must have exact allowlist rows for the FROM and REPLY_TO roles respectively. The Reply-To address must be an untagged base address; the service persists it for the conversation and sends from base-local+c_<32 lowercase hex routing token>@domain. Identity or fixed-base rejection uses one generic 400 response. A failed V1 topic conversation may be reopened and promoted to V2 when all prior messages are failed and its persisted Reply-To base is absent or equals the requested base. Promotion occurs when the V2 intent is successfully persisted, before the provider call, so a subsequent 502 does not undo it.",
         "tags": ["Conversations"],
         "security": [{ "emailV2Auth": [] }],
         "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
@@ -1359,10 +1366,21 @@
                     "address": "booking@mail.example.com",
                     "name": "Booking Team"
                   },
+                  "to": [
+                    {
+                      "address": "person@example.com",
+                      "name": "Person"
+                    },
+                    {
+                      "address": "backup@example.com",
+                      "name": "Backup Person"
+                    }
+                  ],
                   "replyTo": {
                     "address": "booking-replies@mail.example.com",
                     "name": "Booking Team"
-                  }
+                  },
+                  "tags": [{ "name": "category", "value": "booking_update" }]
                 }
               }
             }
@@ -1632,7 +1650,7 @@
       "post": {
         "operationId": "createConversationMessageV2",
         "summary": "Continue a conversation with explicit identities",
-        "description": "Sends a reply using required from and replyTo identities. Exact role-specific allowlist rows are checked before conversation lookup. The requested Reply-To base must equal the conversation's persisted base once set. Persisting the V2 reply intent atomically promotes a V1 conversation to V2 and makes future V1 reply and enqueue writes return 409. Promotion does not require provider acceptance and remains committed if the subsequent synchronous provider call returns 502. Parent selection and RFC threading match V1.",
+        "description": "Sends a reply using required from and replyTo identities. Optional to recipients override the outbound recipient list but do not change the single conversation participant; when omitted, the reply is sent to participant. Optional tags are forwarded to Resend. Exact role-specific allowlist rows are checked before conversation lookup. The requested Reply-To base must equal the conversation's persisted base once set. Persisting the V2 reply intent atomically promotes a V1 conversation to V2 and makes future V1 reply and enqueue writes return 409. Promotion does not require provider acceptance and remains committed if the subsequent synchronous provider call returns 502. Parent selection and RFC threading match V1.",
         "tags": ["Messages"],
         "security": [{ "emailV2Auth": [] }],
         "parameters": [
@@ -1652,10 +1670,21 @@
                   "address": "booking@mail.example.com",
                   "name": "Booking Team"
                 },
+                "to": [
+                  {
+                    "address": "person@example.com",
+                    "name": "Person"
+                  },
+                  {
+                    "address": "backup@example.com",
+                    "name": "Backup Person"
+                  }
+                ],
                 "replyTo": {
                   "address": "booking-replies@mail.example.com",
                   "name": "Booking Team"
-                }
+                },
+                "tags": [{ "name": "category", "value": "conversation_reply" }]
               }
             }
           }
@@ -2004,6 +2033,41 @@
           }
         }
       },
+      "EmailRecipientList": {
+        "oneOf": [
+          { "$ref": "#/components/schemas/EmailIdentity" },
+          {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 50,
+            "items": { "$ref": "#/components/schemas/EmailIdentity" }
+          }
+        ],
+        "description": "One recipient identity or an array of 1-50 recipient identities. A singular identity is accepted for compatibility."
+      },
+      "EmailTags": {
+        "type": "array",
+        "maxItems": 10,
+        "items": {
+          "type": "object",
+          "required": ["name", "value"],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^(?=.*\\S)[^\\u0000-\\u001F\\u007F]{1,256}$"
+            },
+            "value": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^(?=.*\\S)[^\\u0000-\\u001F\\u007F]{1,256}$"
+            }
+          }
+        },
+        "description": "Optional Resend tags forwarded with the provider send request. Blank names or values are rejected."
+      },
       "ReplyToIdentity": {
         "allOf": [
           {
@@ -2104,8 +2168,15 @@
             "allOf": [{ "$ref": "#/components/schemas/EmailIdentity" }],
             "description": "Required sender identity. The normalized address must exactly match a database allowlist row with role FROM."
           },
+          "to": {
+            "$ref": "#/components/schemas/EmailRecipientList",
+            "description": "Optional outbound recipients. When omitted, conversation sends target the single conversation participant. Recipients are not allowlisted and do not become conversation participants."
+          },
           "replyTo": {
             "$ref": "#/components/schemas/ReplyToIdentity"
+          },
+          "tags": {
+            "$ref": "#/components/schemas/EmailTags"
           },
           "replyToName": false
         },
@@ -2153,8 +2224,8 @@
             "description": "Sender identity. The normalized address must exactly match a database allowlist row with role FROM."
           },
           "to": {
-            "allOf": [{ "$ref": "#/components/schemas/EmailIdentity" }],
-            "description": "Singular recipient identity. The recipient is not checked against the identity allowlist."
+            "$ref": "#/components/schemas/EmailRecipientList",
+            "description": "Recipient identity or nonempty recipient identity array. Recipients are not checked against the identity allowlist."
           },
           "subject": {
             "type": "string",
@@ -2173,6 +2244,9 @@
             "minLength": 1,
             "maxLength": 1048576,
             "description": "Untrusted HTML content."
+          },
+          "tags": {
+            "$ref": "#/components/schemas/EmailTags"
           },
           "replyTo": false
         },

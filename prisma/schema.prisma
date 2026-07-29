@@ -111,11 +111,13 @@ model EmailMessage {
   fromName                    String?             @map("from_name")
   toAddress                   String              @map("to_address")
   toName                      String?             @map("to_name")
+  toRecipients                Json?               @map("to_recipients") @db.JsonB
   replyToAddress              String?             @map("reply_to_address")
   replyToName                 String?             @map("reply_to_name")
   subject                     String
   textBody                    String?             @map("text_body")
   htmlBody                    String?             @map("html_body")
+  tags                        Json?               @db.JsonB
   emailCreatedAt              DateTime            @map("email_created_at") @db.Timestamptz(6)
   idempotencyKey              String?             @unique(map: "email_messages_idempotency_key_key") @map("idempotency_key") @db.VarChar(256)
   requestHash                 String?             @map("request_hash") @db.Char(64)

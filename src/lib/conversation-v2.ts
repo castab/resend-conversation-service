@@ -255,18 +255,24 @@ function messageCreateData(
   requestHash: string,
   queued: boolean,
 ) {
+  const recipients = value.message.to ?? [
+    { address: value.participant.email, name: value.participant.name },
+  ];
   return {
     direction: 'OUTBOUND' as const,
     state: 'PENDING' as const,
     deliveryState: 'UNKNOWN' as const,
     fromAddress: value.message.from.address,
     fromName: value.message.from.name,
-    toAddress: value.participant.email,
+    toAddress: recipients[0].address,
+    toName: recipients[0].name,
+    toRecipients: recipients,
     replyToAddress,
     replyToName: value.message.replyTo.name,
     subject,
     textBody: value.message.text,
     htmlBody: value.message.html,
+    tags: value.message.tags ?? undefined,
     emailCreatedAt: now,
     idempotencyKey,
     requestHash,
@@ -494,6 +500,7 @@ export async function createMessageV2(
           conversationId,
           parent.id,
           current.participantAddress,
+          current.participantName,
           current.subject,
           current.routingToken,
           parentInternetMessageId,
@@ -562,6 +569,7 @@ function replyCreateData(
   conversationId: string,
   parentMessageId: string,
   toAddress: string,
+  toName: string | null,
   conversationSubject: string,
   routingToken: string,
   parentInternetMessageId: string,
@@ -572,6 +580,7 @@ function replyCreateData(
   requestHash: string,
   queued: boolean,
 ) {
+  const recipients = value.to ?? [{ address: toAddress, name: toName }];
   return {
     conversationId,
     parentMessageId,
@@ -582,7 +591,9 @@ function replyCreateData(
     referenceInternetMessageIds: references,
     fromAddress: value.from.address,
     fromName: value.from.name,
-    toAddress,
+    toAddress: recipients[0].address,
+    toName: recipients[0].name,
+    toRecipients: recipients,
     replyToAddress: buildConversationReplyTo(
       value.replyTo.address,
       routingToken,
@@ -591,6 +602,7 @@ function replyCreateData(
     subject: createReplySubject(conversationSubject),
     textBody: value.text,
     htmlBody: value.html,
+    tags: value.tags ?? undefined,
     emailCreatedAt: now,
     idempotencyKey,
     requestHash,

@@ -88,7 +88,9 @@ The key is the exact `(address, role)` pair. A row for the same address under th
 
 For a new send intent, both rows must exist. Removing a row blocks later new V2 sends and enqueues. It does not alter or block an already-persisted outbox intent, and a replay of an already-persisted idempotent request is reconciled from stored state before a new authorization check.
 
-Direct email instead requires structured `from` and `to` identities. Only `from.address` requires an exact `FROM` row; recipients are not allowlisted. Direct-email sender revocation blocks new intent but does not change replay of intent already persisted under the same idempotency key.
+Direct email instead requires a structured `from` identity and either one structured `to` identity or a nonempty `to` array of structured identities. Only `from.address` requires an exact `FROM` row; recipients are not allowlisted. Direct-email sender revocation blocks new intent but does not change replay of intent already persisted under the same idempotency key.
+
+Conversation V2 send and enqueue requests may also include outbound `to` recipients. These recipients are not allowlisted and do not replace the canonical single conversation participant used for ownership, routing, and inbound matching. When `to` is omitted, conversation emails are sent to the participant.
 
 Authorization-policy failures deliberately return the same generic response and do not reveal which identity failed:
 
@@ -141,17 +143,29 @@ Send `POST /api/emails/v2` with a globally unique `Idempotency-Key`:
     "address": "notifications@example.com",
     "name": "Example"
   },
-  "to": {
-    "address": "person@example.com",
-    "name": "Person"
-  },
+  "to": [
+    {
+      "address": "person@example.com",
+      "name": "Person"
+    },
+    {
+      "address": "second@example.com",
+      "name": "Second Person"
+    }
+  ],
   "subject": "Verify your email",
   "text": "Use the verification link.",
-  "html": "<p>Use the verification link.</p>"
+  "html": "<p>Use the verification link.</p>",
+  "tags": [
+    {
+      "name": "category",
+      "value": "confirm_email"
+    }
+  ]
 }
 ```
 
-The singular recipient and subject are required, and at least one of `text` or `html` must be nonempty. `replyTo` is rejected. The service creates no conversation, parent, routing token, outbox entry, Reply-To header, or RFC threading headers. Because standard mail clients fall back to the From mailbox when Reply-To is absent, select an appropriate monitored or no-reply From identity.
+At least one recipient and a subject are required, and at least one of `text` or `html` must be nonempty. `to` may remain the legacy single identity object or may be an array of up to 50 identities. Optional `tags` are forwarded to Resend and are limited to 10 nonblank `{name,value}` pairs. `replyTo` is rejected. The service creates no conversation, parent, routing token, outbox entry, Reply-To header, or RFC threading headers. Because standard mail clients fall back to the From mailbox when Reply-To is absent, select an appropriate monitored or no-reply From identity.
 
 New provider acceptance returns `201`:
 
@@ -191,15 +205,31 @@ Send `POST /api/conversations/v2` with a unique `Idempotency-Key`:
       "address": "booking@mail.example.com",
       "name": "Booking Team"
     },
+    "to": [
+      {
+        "address": "person@example.com",
+        "name": "Person"
+      },
+      {
+        "address": "backup@example.com",
+        "name": "Backup Person"
+      }
+    ],
     "replyTo": {
       "address": "booking-replies@mail.example.com",
       "name": "Booking Team"
-    }
+    },
+    "tags": [
+      {
+        "name": "category",
+        "value": "booking_update"
+      }
+    ]
   }
 }
 ```
 
-At least one nonempty `message.text` or `message.html` value is required. Each body is limited to 1 MiB. V2 rejects the V1 `message.replyToName` property; use `message.replyTo.name`.
+At least one nonempty `message.text` or `message.html` value is required. Each body is limited to 1 MiB. Optional `message.to` may be one recipient identity or an array of up to 50 recipient identities; if omitted, the opening email is sent to `participant`. Optional `message.tags` are forwarded to Resend and are limited to 10 nonblank `{name,value}` pairs. V2 rejects the V1 `message.replyToName` property; use `message.replyTo.name`.
 
 The service creates one conversation per topic. If all messages in an existing topic conversation are `failed`, V2 may reopen it with a new idempotency key. Reopening a failed V1 conversation promotes it to V2 only when its fixed Reply-To base is absent or equals the requested base.
 
@@ -215,14 +245,30 @@ Send `POST /api/conversations/v2/{conversationId}/messages`:
     "address": "booking@mail.example.com",
     "name": "Booking Team"
   },
+  "to": [
+    {
+      "address": "person@example.com",
+      "name": "Person"
+    },
+    {
+      "address": "backup@example.com",
+      "name": "Backup Person"
+    }
+  ],
   "replyTo": {
     "address": "booking-replies@mail.example.com",
     "name": "Booking Team"
-  }
+  },
+  "tags": [
+    {
+      "name": "category",
+      "value": "conversation_reply"
+    }
+  ]
 }
 ```
 
-`replyToMessageId` is optional. When omitted, the service selects the latest `accepted` or `received` message. An explicit parent must belong to the conversation. A reply is never sent without a parent RFC `Message-ID`; `In-Reply-To` uses that ID and `References` uses the parent's stored ancestry followed by the parent ID.
+`replyToMessageId` is optional. When omitted, the service selects the latest `accepted` or `received` message. Optional `to` recipients override the outbound recipient list for that reply only; if omitted, the reply is sent to the conversation participant. Optional `tags` are forwarded to Resend and have the same limits as opening-message tags. An explicit parent must belong to the conversation. A reply is never sent without a parent RFC `Message-ID`; `In-Reply-To` uses that ID and `References` uses the parent's stored ancestry followed by the parent ID.
 
 A V2 reply to a V1 conversation atomically promotes the conversation when the send intent is successfully persisted. This applies to synchronous and enqueue replies. For a synchronous reply, promotion is committed before the provider call and remains in effect if that call subsequently returns `502`; provider acceptance is not required. A request that fails before send-intent persistence does not promote state.
 

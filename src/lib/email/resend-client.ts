@@ -6,6 +6,7 @@ export interface SendEmailInput {
   text?: string;
   html?: string;
   headers?: Record<string, string>;
+  tags?: Array<{ name: string; value: string }>;
 }
 
 export interface ResendEmail {

@@ -15,6 +15,11 @@ export type EmailIdentityInput = {
   name: string | null;
 };
 
+export type EmailTagInput = {
+  name: string;
+  value: string;
+};
+
 export type CreateConversationInput = {
   topic: { type: string; externalId: string; title: string };
   participant: { email: string; name: string | null };
@@ -28,7 +33,9 @@ export type CreateConversationV2Input = Omit<
 > & {
   message: Omit<CreateConversationInput['message'], 'replyToName'> & {
     from: EmailIdentityInput;
+    to?: EmailIdentityInput[];
     replyTo: EmailIdentityInput;
+    tags?: EmailTagInput[];
   };
 };
 
@@ -37,16 +44,23 @@ export type MessageV2Input = {
   html?: string;
   replyToMessageId?: string;
   from: EmailIdentityInput;
+  to?: EmailIdentityInput[];
   replyTo: EmailIdentityInput;
+  tags?: EmailTagInput[];
 };
 
 export type DirectEmailV2Input = {
   from: EmailIdentityInput;
-  to: EmailIdentityInput;
+  to: EmailIdentityInput[];
   subject: string;
   text?: string;
   html?: string;
+  tags?: EmailTagInput[];
 };
+
+const MAX_TAG_LENGTH = 256;
+const MAX_RECIPIENTS = 50;
+const MAX_TAGS = 10;
 
 function normalizeReplyToName(value: unknown): string | null | undefined {
   if (value === undefined || value === null) {
@@ -230,6 +244,61 @@ function normalizeEmailIdentity(
   return { value: { address, name: name || null } };
 }
 
+function normalizeEmailIdentities(
+  value: unknown,
+  field: string,
+): { value: EmailIdentityInput[] } | { error: string } {
+  const items = Array.isArray(value) ? value : [value];
+  if (!items.length) {
+    return { error: `${field} must contain at least one recipient` };
+  }
+  if (items.length > MAX_RECIPIENTS) {
+    return { error: `${field} must contain at most 50 recipients` };
+  }
+  const normalized: EmailIdentityInput[] = [];
+  for (const [index, item] of items.entries()) {
+    const identity = normalizeEmailIdentity(item, `${field}[${index}]`, false);
+    if ('error' in identity) {
+      return Array.isArray(value)
+        ? identity
+        : { error: `${field}.address must be a valid email address` };
+    }
+    normalized.push(identity.value);
+  }
+  return { value: normalized };
+}
+
+function normalizeTags(
+  value: unknown,
+  field: string,
+): { value: EmailTagInput[] | undefined } | { error: string } {
+  if (value === undefined) {
+    return { value: undefined };
+  }
+  if (!Array.isArray(value)) {
+    return { error: `${field} must be an array` };
+  }
+  if (value.length > MAX_TAGS) {
+    return { error: `${field} must contain at most 10 tags` };
+  }
+  const tags: EmailTagInput[] = [];
+  for (const [index, item] of value.entries()) {
+    if (
+      !isRecord(item) ||
+      !isHeaderSafeText(item.name, MAX_TAG_LENGTH) ||
+      !item.name.trim() ||
+      !isHeaderSafeText(item.value, MAX_TAG_LENGTH) ||
+      !item.value.trim()
+    ) {
+      return {
+        error: `${field}[${index}].name and ${field}[${index}].value must be nonempty header-safe strings of at most 256 characters`,
+      };
+    }
+    tags.push({ name: item.name.trim(), value: item.value.trim() });
+  }
+  return { value: tags.length ? tags : undefined };
+}
+
 export function validateCreateV2Body(
   value: unknown,
 ): { value: CreateConversationV2Input } | { error: string } {
@@ -259,6 +328,17 @@ export function validateCreateV2Body(
   if ('error' in replyTo) {
     return replyTo;
   }
+  const tags = normalizeTags(value.message.tags, 'message.tags');
+  if ('error' in tags) {
+    return tags;
+  }
+  const to =
+    value.message.to === undefined
+      ? undefined
+      : normalizeEmailIdentities(value.message.to, 'message.to');
+  if (to && 'error' in to) {
+    return to;
+  }
   return {
     value: {
       topic: base.value.topic,
@@ -268,7 +348,9 @@ export function validateCreateV2Body(
         ...(base.value.message.text ? { text: base.value.message.text } : {}),
         ...(base.value.message.html ? { html: base.value.message.html } : {}),
         from: from.value,
+        ...(to ? { to: to.value } : {}),
         replyTo: replyTo.value,
+        ...(tags.value ? { tags: tags.value } : {}),
       },
     },
   };
@@ -295,6 +377,17 @@ export function validateMessageV2Body(
   if ('error' in replyTo) {
     return replyTo;
   }
+  const tags = normalizeTags(value.tags, 'tags');
+  if ('error' in tags) {
+    return tags;
+  }
+  const to =
+    value.to === undefined
+      ? undefined
+      : normalizeEmailIdentities(value.to, 'to');
+  if (to && 'error' in to) {
+    return to;
+  }
   return {
     value: {
       ...(base.value.text ? { text: base.value.text } : {}),
@@ -303,7 +396,9 @@ export function validateMessageV2Body(
         ? { replyToMessageId: base.value.replyToMessageId }
         : {}),
       from: from.value,
+      ...(to ? { to: to.value } : {}),
       replyTo: replyTo.value,
+      ...(tags.value ? { tags: tags.value } : {}),
     },
   };
 }
@@ -322,9 +417,13 @@ export function validateDirectEmailV2Body(
   if ('error' in from) {
     return from;
   }
-  const to = normalizeEmailIdentity(value.to, 'to', false);
+  const to = normalizeEmailIdentities(value.to, 'to');
   if ('error' in to) {
     return to;
+  }
+  const tags = normalizeTags(value.tags, 'tags');
+  if ('error' in tags) {
+    return tags;
   }
   if (
     !isHeaderSafeText(value.subject, MAX_SUBJECT_LENGTH) ||
@@ -367,6 +466,7 @@ export function validateDirectEmailV2Body(
       subject: value.subject.trim(),
       ...(text ? { text } : {}),
       ...(html ? { html } : {}),
+      ...(tags.value ? { tags: tags.value } : {}),
     },
   };
 }

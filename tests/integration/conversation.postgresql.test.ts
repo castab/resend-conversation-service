@@ -249,9 +249,16 @@ describe('Private conversation API', () => {
     expect(resendServer.sends[0].input.from).toBe(
       `Fiona's Ice Cream <${V2_FROM}>`,
     );
+    expect(resendServer.sends[0].input.to).toEqual([
+      'Person <person@example.com>',
+      'Backup Person <backup@example.com>',
+    ]);
     expect(resendServer.sends[0].input.reply_to).toBe(
       `Booking Team <${body.message.replyTo}>`,
     );
+    expect(resendServer.sends[0].input.tags).toEqual([
+      { name: 'category', value: 'booking_update' },
+    ]);
   });
 
   it('promotes a V1 conversation on V2 reply and blocks later V1 writes', async () => {
@@ -267,11 +274,23 @@ describe('Private conversation API', () => {
         body: JSON.stringify({
           text: 'Continue through V2.',
           from: { address: V2_FROM, name: 'Booking Team' },
+          to: [
+            { address: 'person@example.com', name: 'Person' },
+            { address: 'backup@example.com', name: 'Backup Person' },
+          ],
           replyTo: { address: TEST_CONFIG.replyToBaseAddress },
+          tags: [{ name: 'category', value: 'conversation_reply' }],
         }),
       },
     );
     expect(promotedResponse.status).toBe(201);
+    expect(resendServer.sends[1].input.to).toEqual([
+      'Person <person@example.com>',
+      'Backup Person <backup@example.com>',
+    ]);
+    expect(resendServer.sends[1].input.tags).toEqual([
+      { name: 'category', value: 'conversation_reply' },
+    ]);
     const { rows } = await database.query(
       'SELECT api_version, reply_to_requires_allowlist FROM email_conversations WHERE id = $1',
       [created.body.conversationId],
@@ -336,6 +355,13 @@ describe('Private conversation API', () => {
     expect(resendServer.batches[0].inputs[0].from).toBe(
       `Fiona's Ice Cream <${V2_FROM}>`,
     );
+    expect(resendServer.batches[0].inputs[0].to).toEqual([
+      'Person <person@example.com>',
+      'Backup Person <backup@example.com>',
+    ]);
+    expect(resendServer.batches[0].inputs[0].tags).toEqual([
+      { name: 'category', value: 'booking_update' },
+    ]);
   });
 
   it('rejects a different allowed Reply-To base for a V2 conversation', async () => {
@@ -1114,7 +1140,12 @@ function v2CreateBody(externalId: string) {
     message: {
       text: 'Opening message',
       from: { address: V2_FROM, name: "Fiona's Ice Cream" },
+      to: [
+        { address: 'person@example.com', name: 'Person' },
+        { address: 'backup@example.com', name: 'Backup Person' },
+      ],
       replyTo: { address: V2_REPLY_TO, name: 'Booking Team' },
+      tags: [{ name: 'category', value: 'booking_update' }],
     },
   };
 }

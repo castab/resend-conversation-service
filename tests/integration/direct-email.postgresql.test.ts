@@ -104,8 +104,9 @@ describe('Direct email API v2', () => {
 
     const pending = await database.query(
       `SELECT id, kind, conversation_id, state, from_address, from_name,
-              to_address, to_name, reply_to_address, parent_message_id,
-              in_reply_to_internet_message_id, reference_internet_message_ids
+              to_address, to_name, to_recipients, tags, reply_to_address,
+              parent_message_id, in_reply_to_internet_message_id,
+              reference_internet_message_ids
        FROM email_messages WHERE idempotency_key = $1`,
       ['direct-success'],
     );
@@ -120,6 +121,11 @@ describe('Direct email API v2', () => {
       from_name: 'System Team',
       to_address: 'person@example.com',
       to_name: 'External Person',
+      to_recipients: [
+        { address: 'person@example.com', name: 'External Person' },
+        { address: 'second@example.com', name: 'Second Person' },
+      ],
+      tags: [{ name: 'category', value: 'confirm_email' }],
       reply_to_address: null,
       parent_message_id: null,
       in_reply_to_internet_message_id: null,
@@ -142,10 +148,14 @@ describe('Direct email API v2', () => {
       idempotencyKey: `email/${pending.rows[0].id}`,
       input: {
         from: 'System Team <system@example.com>',
-        to: ['External Person <person@example.com>'],
+        to: [
+          'External Person <person@example.com>',
+          'Second Person <second@example.com>',
+        ],
         subject: 'Verify your email',
         text: 'Use the verification link.',
         html: '<p>Use the verification link.</p>',
+        tags: [{ name: 'category', value: 'confirm_email' }],
       },
     });
     expect(resendServer.sends[0].input.reply_to).toBeUndefined();
@@ -283,6 +293,15 @@ describe('Direct email API v2', () => {
       subject: 'Verify your email',
       text: 'Use the verification link.',
       html: '<p>Use the verification link.</p>',
+      ...(idempotencyKey === 'direct-success'
+        ? {
+            to: [
+              { address: ' Person@Example.com ', name: 'External Person' },
+              { address: ' Second@Example.com ', name: 'Second Person' },
+            ],
+            tags: [{ name: 'category', value: 'confirm_email' }],
+          }
+        : {}),
       ...overrides,
     };
     return fetch(baseUrl, {
