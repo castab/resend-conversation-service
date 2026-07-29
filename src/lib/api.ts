@@ -6,6 +6,7 @@ import {
   type Prisma,
 } from '@/lib/database';
 import { buildConversationReplyTo } from '@/lib/email';
+import { resolveEmailV2ApiKey } from '@/lib/environment';
 
 export function authorize(request: Request): Response | null {
   return authorizeWithCredential(
@@ -18,8 +19,8 @@ export function authorize(request: Request): Response | null {
 export function authorizeEmailV2(request: Request): Response | null {
   return authorizeWithCredential(
     request,
-    process.env.EMAIL_v2_API_KEY,
-    'EMAIL_v2_API_KEY',
+    resolveEmailV2ApiKey(),
+    'EMAIL_v2_API_KEY or EMAIL_V2_API_KEY',
   );
 }
 

@@ -1,5 +1,6 @@
 import { getPrismaClient } from '@/lib/database';
 import { isValidReplyToBaseAddress } from '@/lib/email';
+import { resolveEmailV2ApiKey } from '@/lib/environment';
 
 export async function GET(request: Request) {
   if (new URL(request.url).search) {
@@ -16,7 +17,7 @@ export async function GET(request: Request) {
     !process.env.RESEND_REPLY_TO ||
     !isValidReplyToBaseAddress(process.env.RESEND_REPLY_TO) ||
     !process.env.CONVERSATION_API_KEY ||
-    !process.env.EMAIL_v2_API_KEY ||
+    !resolveEmailV2ApiKey() ||
     !process.env.OUTBOX_DRAIN_API_KEY
   ) {
     return Response.json({ status: 'unhealthy' }, { status: 503 });

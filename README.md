@@ -78,7 +78,7 @@ The health endpoint is available at both `/api/health/v2` and
 readiness checks. The webhook requires a valid signature over the exact raw
 body and all three Svix headers. V1 conversation operations require
 `CONVERSATION_API_KEY`; V2 conversation operations and direct email require the
-separate `EMAIL_v2_API_KEY`. Both outbox drain routes use
+separate `EMAIL_v2_API_KEY` (or `EMAIL_V2_API_KEY` as a fallback). Both outbox drain routes use
 `OUTBOX_DRAIN_API_KEY`. Sending and enqueueing operations also require
 `Idempotency-Key`.
 
@@ -176,7 +176,9 @@ OUTBOX_DRAIN_API_KEY=replace-with-another-long-random-secret
 
 `RESEND_FROM`, `RESEND_REPLY_TO`, and `CONVERSATION_API_KEY` define the frozen
 V1 identity and credential. V2 callers use `EMAIL_v2_API_KEY` and select
-only database-allowlisted identities in each request.
+only database-allowlisted identities in each request. Deployments may use
+`EMAIL_V2_API_KEY` as an interchangeable fallback; when both variables are
+nonempty, `EMAIL_v2_API_KEY` takes precedence.
 
 Every Reply-To base, whether supplied by V1 configuration or a V2 caller, must
 be a plain mailbox on a Resend Receiving domain, without a display name or an
@@ -314,9 +316,9 @@ Published releases are also available on Docker Hub as
 `castab/resend-service`.
 
 ```bash
-docker pull castab/resend-service:0.3.0
-docker run --rm -e DATABASE_URL="$DATABASE_URL" castab/resend-service:0.3.0 npm run db:migrate:deploy
-docker run --rm -p 3000:3000 --env-file .env castab/resend-service:0.3.0
+docker pull castab/resend-service:0.3.1
+docker run --rm -e DATABASE_URL="$DATABASE_URL" castab/resend-service:0.3.1 npm run db:migrate:deploy
+docker run --rm -p 3000:3000 --env-file .env castab/resend-service:0.3.1
 ```
 
 Stable releases publish one immutable exact tag, plus moving convenience tags:

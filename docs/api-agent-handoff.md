@@ -1,6 +1,6 @@
 # API Agent Handoff
 
-Contract version: `0.3.0`
+Contract version: `0.3.1`
 
 ## Sources
 
@@ -24,6 +24,8 @@ Use the upstream `openapi.json`, consumer guide, release notes, and versioned se
 | Resend webhook | Exact-body `svix-id`, `svix-timestamp`, `svix-signature` |
 
 Credentials are not interchangeable and are never browser-safe.
+The service operator may supply the V2 credential through `EMAIL_v2_API_KEY`
+or `EMAIL_V2_API_KEY`; the mixed-case name takes precedence when both are set.
 
 ## V2 request rules
 
@@ -123,7 +125,7 @@ V2 mirrors the complete V1 conversation layout:
 6. Handle `200`, `201`, and `202` as state-bearing success responses.
 7. Reconcile `502` using the same key; do not create a replacement direct send with a new key.
 8. Sanitize response HTML.
-9. Validate request and response models against upstream OpenAPI contract `0.3.0`.
+9. Validate request and response models against upstream OpenAPI contract `0.3.1`.
 
 ## Known concerns
 

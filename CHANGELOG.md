@@ -7,6 +7,13 @@ Versioning.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-07-28
+
+### Changed
+
+- Accepted `EMAIL_V2_API_KEY` as a fallback for the preferred
+  `EMAIL_v2_API_KEY` V2 credential environment variable.
+
 ## [0.3.0] - 2026-07-28
 
 ### Added
