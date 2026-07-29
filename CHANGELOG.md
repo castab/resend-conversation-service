@@ -13,6 +13,12 @@ Versioning.
   `POST /api/emails/v2/outbox/drain` as an alias of the shared direct and
   conversation outbox drain.
 
+### Deprecated
+
+- Deprecated `POST /api/conversations/v2/outbox/drain` in favor of the
+  email-namespaced shared drain. The old route remains a supported alias with
+  no announced sunset.
+
 ## [0.3.1] - 2026-07-28
 
 ### Changed

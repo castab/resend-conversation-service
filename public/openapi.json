@@ -1667,8 +1667,9 @@
     "/api/conversations/v2/outbox/drain": {
       "post": {
         "operationId": "drainConversationOutboxV2",
-        "summary": "Deliver one shared outbox batch",
-        "description": "Conversation V2 route mirror for the shared outbox drain. It uses only the dedicated drain credential and may deliver direct, V1 conversation, and V2 conversation messages from the same persisted outbox.",
+        "deprecated": true,
+        "summary": "Deliver one shared outbox batch using a deprecated alias",
+        "description": "Deprecated compatibility alias for POST /api/emails/v2/outbox/drain with no announced sunset. It uses only the dedicated drain credential and retains identical shared behavior, including delivery of direct, V1 conversation, and V2 conversation messages from the same persisted outbox. New scheduler integrations must use the email-namespaced route.",
         "tags": ["Outbox"],
         "security": [{ "outboxDrainAuth": [] }],
         "requestBody": {

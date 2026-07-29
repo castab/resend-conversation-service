@@ -65,7 +65,7 @@ GET   /api/conversations/v1/topics/{topicType}/{externalTopicId}
 POST  /api/conversations/v2
 GET   /api/conversations/v2?assignment=unassigned
 POST  /api/conversations/v2/outbox
-POST  /api/conversations/v2/outbox/drain
+POST  /api/conversations/v2/outbox/drain  # deprecated compatibility alias
 GET   /api/conversations/v2/{conversationId}
 PATCH /api/conversations/v2/{conversationId}
 POST  /api/conversations/v2/{conversationId}/messages
@@ -359,13 +359,13 @@ authentication enabled even when conversation routes are gateway-restricted.
 Configure Resend to deliver signed events to
 `https://<webhook-host>/api/webhooks/resend/v1`.
 
-Invoke one of the shared drain aliases at least once per minute when using
-asynchronous sends. New deployments should use
+Invoke one shared drain route at least once per minute when using asynchronous
+sends. New deployments should use
 `POST /api/emails/v2/outbox/drain`; both versioned conversation drain paths
-remain supported. All aliases use the same persisted outbox and drain
-credential, may process direct and conversation intent together, handle one
-bounded batch per request, and do not poll internally. Do not schedule every
-alias for the same interval.
+remain supported as deprecated compatibility aliases. All routes use the same
+persisted outbox and drain credential, may process direct and conversation
+intent together, handle one bounded batch per request, and do not poll
+internally. Do not schedule every route for the same interval.
 
 ## Verification
 

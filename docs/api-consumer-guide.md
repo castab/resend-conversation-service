@@ -52,7 +52,7 @@ remains V1.
 
 - Send `Authorization: Bearer <OUTBOX_DRAIN_API_KEY>`.
 - Neither conversation credential is accepted.
-- `/api/emails/v2/outbox/drain` and both versioned conversation drain paths invoke the same shared behavior and use this dedicated credential.
+- `/api/emails/v2/outbox/drain` is the current path. Both versioned conversation drain paths are deprecated compatibility aliases with no announced sunset. All three invoke the same shared behavior and use this dedicated credential.
 
 ### Webhooks
 
@@ -129,7 +129,7 @@ When a V1 conversation is promoted, its existing persisted `RESEND_REPLY_TO` bas
 | `POST` | `/api/conversations/v2` | Create and synchronously send an opening message | `201`, replay `200`/`202` | `400`, `401`, `409`, `413`, `415`, `500`, `502` |
 | `GET` | `/api/conversations/v2?assignment=unassigned` | List unassigned inbound conversations | `200` | `400`, `401`, `500` |
 | `POST` | `/api/conversations/v2/outbox` | Persist and enqueue an opening message | `202`, replay `200`/`202` | `400`, `401`, `409`, `413`, `415`, `500`, `502` |
-| `POST` | `/api/conversations/v2/outbox/drain` | Deliver one shared bounded outbox batch | `200` | `400`, `401`, `413`, `415`, `500` |
+| `POST` | `/api/conversations/v2/outbox/drain` | Deprecated compatibility alias for the shared drain | `200` | `400`, `401`, `413`, `415`, `500` |
 | `GET` | `/api/conversations/v2/{conversationId}` | Read a conversation by service ID | `200` | `400`, `401`, `404`, `500` |
 | `PATCH` | `/api/conversations/v2/{conversationId}` | Assign an unassigned null-version or V2 conversation and mark it V2 | `200` | `400`, `401`, `404`, `409`, `413`, `415`, `500` |
 | `POST` | `/api/conversations/v2/{conversationId}/messages` | Synchronously send a reply | `201`, replay `200`/`202` | `400`, `401`, `404`, `409`, `413`, `415`, `500`, `502`, `503` |
@@ -291,7 +291,7 @@ Enqueue returns `202` after atomically persisting intent and its outbox entry. A
 }
 ```
 
-The preferred scheduler path is `POST /api/emails/v2/outbox/drain`. The V1 and V2 conversation drain paths remain equivalent aliases. The drain processes at most one persistent batch per request. Direct, V1 conversation, and V2 conversation intent share global ordering and may occupy one fixed batch, including shared retry and batch-level terminal outcomes. A drain response can return `200` while reporting failed, retried, or indeterminate item state. Schedule one alias, not all aliases.
+The current scheduler path is `POST /api/emails/v2/outbox/drain`. The V1 and V2 conversation drain paths remain equivalent deprecated aliases with no announced sunset. The drain processes at most one persistent batch per request. Direct, V1 conversation, and V2 conversation intent share global ordering and may occupy one fixed batch, including shared retry and batch-level terminal outcomes. A drain response can return `200` while reporting failed, retried, or indeterminate item state. Schedule one alias, not all aliases.
 
 ### Read and assign
 
