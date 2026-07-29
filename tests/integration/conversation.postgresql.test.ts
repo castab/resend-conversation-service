@@ -2,6 +2,7 @@ import { FakeResendServer } from '@test-support/fake-resend-server';
 import { TEST_CONFIG } from '@test-support/setup';
 import { Client } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { resolveEmailV2ApiKey } from '@/lib/environment';
 import { fixtures } from '../helpers/fixtures';
 import { generateSvixId, signPayload } from '../helpers/svix';
 
@@ -35,6 +36,24 @@ describe('Private conversation API', () => {
   it('requires bearer authentication', async () => {
     const response = await fetch(`${baseUrl}?assignment=unassigned`);
     expect(response.status).toBe(401);
+  });
+
+  it('resolves the V2 API key alias with mixed-case precedence', () => {
+    expect(resolveEmailV2ApiKey({ EMAIL_V2_API_KEY: 'fallback' })).toBe(
+      'fallback',
+    );
+    expect(
+      resolveEmailV2ApiKey({
+        EMAIL_v2_API_KEY: 'preferred',
+        EMAIL_V2_API_KEY: 'fallback',
+      }),
+    ).toBe('preferred');
+    expect(
+      resolveEmailV2ApiKey({
+        EMAIL_v2_API_KEY: '',
+        EMAIL_V2_API_KEY: 'fallback',
+      }),
+    ).toBe('fallback');
   });
 
   it('checks authentication and idempotency before malformed JSON', async () => {

@@ -1,6 +1,6 @@
 # API Consumer Guide
 
-Contract version: `0.3.0`
+Contract version: `0.3.1`
 
 ## Service purpose
 
@@ -35,6 +35,9 @@ remains V1.
 
 - Send `Authorization: Bearer <EMAIL_v2_API_KEY>`.
 - The V2 credential is separate from V1 and from the drain credential.
+- Operators may configure the credential with `EMAIL_v2_API_KEY` or the
+  `EMAIL_V2_API_KEY` fallback. The mixed-case name takes precedence when both
+  are nonempty.
 - Missing or invalid credentials return `401` with `WWW-Authenticate: Bearer`.
 - Missing server-side credential configuration returns `500 {"error":"Server misconfiguration"}`.
 - The same credential authorizes `POST /api/emails/v2`.
@@ -418,7 +421,7 @@ Consumers need the deployed base URL and the credential for their route family. 
 - `RESEND_WEBHOOK_SECRET`
 - `RESEND_FROM` and `RESEND_REPLY_TO` for frozen V1 behavior
 - `CONVERSATION_API_KEY` for V1
-- `EMAIL_v2_API_KEY` for V2
+- `EMAIL_v2_API_KEY` for V2, or `EMAIL_V2_API_KEY` as a fallback
 - `OUTBOX_DRAIN_API_KEY` for the shared drain
 
 V2 additionally requires database allowlist rows for each approved canonical address and role. Keep allowlist changes in controlled database administration; no application management API exists.
@@ -466,7 +469,7 @@ curl -i \
 
 - Current conversation API: V2; deprecated frozen compatibility API: V1 with no announced sunset.
 - OpenAPI version: `3.1.1`.
-- Contract/package version observed in repository: `0.3.0`.
+- Contract/package version observed in repository: `0.3.1`.
 - No browser-safe authentication or correlation/request ID is defined.
 - Gateway exposure policy is deployment-owned and not included in this contract.
 - Topic lookup does not enforce the documented 255-character `externalTopicId` limit although create and assignment do; consumers must follow the stricter contract.

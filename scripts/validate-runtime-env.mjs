@@ -5,9 +5,12 @@ const REQUIRED_ENV_VARS = [
   'RESEND_FROM',
   'RESEND_REPLY_TO',
   'CONVERSATION_API_KEY',
-  'EMAIL_v2_API_KEY',
   'OUTBOX_DRAIN_API_KEY',
 ];
+
+function resolveEmailV2ApiKey(environment = process.env) {
+  return environment.EMAIL_v2_API_KEY || environment.EMAIL_V2_API_KEY;
+}
 
 function isValidReplyToBaseAddress(address) {
   const normalized = address.trim().toLowerCase();
@@ -48,6 +51,10 @@ const missing = REQUIRED_ENV_VARS.filter((name) => {
   const value = process.env[name];
   return typeof value !== 'string' || value.length === 0;
 });
+
+if (!resolveEmailV2ApiKey()) {
+  missing.push('EMAIL_v2_API_KEY or EMAIL_V2_API_KEY');
+}
 
 if (missing.length > 0) {
   console.error(
