@@ -728,6 +728,9 @@
                     "name": "Person"
                   },
                   "replyToAddress": "mailbox+c_8f2a1b9d4f8c4fd2a7319df35a6c041e@replies.example.com",
+                  "state": "awaiting_participant",
+                  "stateChangedAt": "2026-07-18T12:05:00.000Z",
+                  "awaitingReply": false,
                   "lastMessageAt": "2026-07-18T12:05:00.000Z",
                   "createdAt": "2026-07-18T12:00:00.000Z",
                   "updatedAt": "2026-07-18T12:05:00.000Z",
@@ -845,6 +848,9 @@
                     "name": null
                   },
                   "replyToAddress": "mailbox+c_8f2a1b9d4f8c4fd2a7319df35a6c041e@replies.example.com",
+                  "state": "awaiting_participant",
+                  "stateChangedAt": "2026-07-18T12:00:00.000Z",
+                  "awaitingReply": false,
                   "lastMessageAt": "2026-07-18T12:00:00.000Z",
                   "createdAt": "2026-07-18T12:00:00.000Z",
                   "updatedAt": "2026-07-18T12:10:00.000Z",
@@ -1186,6 +1192,9 @@
                     "name": "Person"
                   },
                   "replyToAddress": "mailbox+c_8f2a1b9d4f8c4fd2a7319df35a6c041e@replies.example.com",
+                  "state": "awaiting_participant",
+                  "stateChangedAt": "2026-07-18T12:05:00.000Z",
+                  "awaitingReply": false,
                   "lastMessageAt": "2026-07-18T12:05:00.000Z",
                   "createdAt": "2026-07-18T12:00:00.000Z",
                   "updatedAt": "2026-07-18T12:05:00.000Z",
@@ -1603,6 +1612,49 @@
         }
       }
     },
+    "/api/conversations/v2/summary": {
+      "get": {
+        "operationId": "getConversationStateSummaryV2",
+        "summary": "Summarize conversations by state",
+        "description": "Returns conversation counts for every state plus a paginated list of conversations in the selected states, ordered by oldest state change first so state=awaiting_us reads as a reply queue. Items carry conversation metadata only; read messages from the conversation endpoint. Reads are not version-filtered.",
+        "tags": ["Conversations"],
+        "security": [{ "emailV2Auth": [] }],
+        "parameters": [
+          {
+            "name": "state",
+            "in": "query",
+            "description": "Restrict the list to these states. Repeat the parameter or pass a comma-separated list; values are matched case-insensitively. Omit to list every state. The counts object always covers all four states regardless of this filter.",
+            "explode": true,
+            "schema": {
+              "type": "array",
+              "items": { "$ref": "#/components/schemas/ConversationState" }
+            }
+          },
+          { "$ref": "#/components/parameters/Limit" },
+          {
+            "name": "before",
+            "in": "query",
+            "description": "Opaque cursor returned by the previous state-summary page.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Conversation counts per state and the selected page.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationStateSummary"
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
     "/api/conversations/v2/outbox": {
       "post": {
         "operationId": "enqueueConversationV2",
@@ -1754,6 +1806,45 @@
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "404": { "$ref": "#/components/responses/NotFound" },
           "409": { "$ref": "#/components/responses/Conflict" },
+          "413": { "$ref": "#/components/responses/PayloadTooLarge" },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedContentEncoding"
+          },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/api/conversations/v2/{conversationId}/state": {
+      "post": {
+        "operationId": "setConversationStateV2",
+        "summary": "Set the conversation state",
+        "description": "Operator override for the conversation state, most commonly marking a conversation concluded when it needs no follow-up. Every state is settable and every transition is permitted, including reopening a terminated conversation. Setting the state a conversation already holds succeeds, so retries are safe. No email is sent or enqueued, so no Idempotency-Key is required.",
+        "tags": ["Conversations"],
+        "security": [{ "emailV2Auth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/ConversationId" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetConversationStateRequest"
+              },
+              "example": { "state": "concluded" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The conversation with its updated state.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Conversation" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
           "413": { "$ref": "#/components/responses/PayloadTooLarge" },
           "415": {
             "$ref": "#/components/responses/UnsupportedContentEncoding"
@@ -2596,6 +2687,100 @@
           }
         }
       },
+      "ConversationState": {
+        "type": "string",
+        "description": "Whose turn the conversation is on. Inbound mail sets awaiting_us; persisting outbound reply intent sets awaiting_participant; a bounced, complained, or suppressed outbound delivery sets terminated. Automatic transitions never move a terminated conversation, and inbound mail reopens a concluded one.",
+        "enum": [
+          "awaiting_us",
+          "awaiting_participant",
+          "concluded",
+          "terminated"
+        ]
+      },
+      "ConversationStateCounts": {
+        "type": "object",
+        "description": "Conversation totals per state across the whole service, independent of any state filter.",
+        "required": [
+          "awaiting_us",
+          "awaiting_participant",
+          "concluded",
+          "terminated"
+        ],
+        "properties": {
+          "awaiting_us": { "type": "integer", "minimum": 0 },
+          "awaiting_participant": { "type": "integer", "minimum": 0 },
+          "concluded": { "type": "integer", "minimum": 0 },
+          "terminated": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "ConversationStateSummaryItem": {
+        "type": "object",
+        "description": "Conversation metadata only. Messages are deliberately not included; read them from the conversation endpoint.",
+        "required": [
+          "id",
+          "topic",
+          "title",
+          "subject",
+          "participant",
+          "state",
+          "stateChangedAt",
+          "awaitingReply",
+          "lastMessageAt"
+        ],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "topic": {
+            "oneOf": [
+              { "$ref": "#/components/schemas/Topic" },
+              { "type": "null" }
+            ]
+          },
+          "title": { "type": "string" },
+          "subject": { "type": "string" },
+          "participant": {
+            "$ref": "#/components/schemas/ParticipantResponse"
+          },
+          "state": { "$ref": "#/components/schemas/ConversationState" },
+          "stateChangedAt": { "type": "string", "format": "date-time" },
+          "awaitingReply": { "type": "boolean" },
+          "lastMessageAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "ConversationStateSummary": {
+        "type": "object",
+        "required": ["count", "counts", "conversations", "page"],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Total conversations across the selected states, independent of the returned page."
+          },
+          "counts": {
+            "$ref": "#/components/schemas/ConversationStateCounts"
+          },
+          "conversations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConversationStateSummaryItem"
+            }
+          },
+          "page": {
+            "type": "object",
+            "required": ["hasMore", "before"],
+            "properties": {
+              "hasMore": { "type": "boolean" },
+              "before": { "type": ["string", "null"] }
+            }
+          }
+        }
+      },
+      "SetConversationStateRequest": {
+        "type": "object",
+        "required": ["state"],
+        "properties": {
+          "state": { "$ref": "#/components/schemas/ConversationState" }
+        }
+      },
       "Conversation": {
         "type": "object",
         "required": [
@@ -2605,6 +2790,9 @@
           "subject",
           "participant",
           "replyToAddress",
+          "state",
+          "stateChangedAt",
+          "awaitingReply",
           "lastMessageAt",
           "createdAt",
           "updatedAt",
@@ -2639,6 +2827,16 @@
             "type": "string",
             "format": "email",
             "description": "Stable generated Reply-To routing address. Its base is fixed on first outbound intent and the same per-conversation +c_<32 lowercase hex token> is preserved."
+          },
+          "state": { "$ref": "#/components/schemas/ConversationState" },
+          "stateChangedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the conversation last entered its current state. It only moves when the state value changes, so for awaiting_us it records how long the reply has been owed."
+          },
+          "awaitingReply": {
+            "type": "boolean",
+            "description": "Derived from state; true exactly when state is awaiting_us."
           },
           "lastMessageAt": {
             "type": "string",

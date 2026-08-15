@@ -74,9 +74,11 @@ V2 mirrors the complete V1 conversation layout:
 | `POST` | `/api/emails/v2/outbox` | Persist and enqueue direct email in the shared outbox |
 | `POST` | `/api/emails/v2/outbox/drain` | Preferred alias for draining one shared direct/conversation batch |
 | `POST`, `GET` | `/api/conversations/v2` | Create/send; list unassigned with `assignment=unassigned` |
+| `GET` | `/api/conversations/v2/summary` | Counts per conversation state plus a filterable page of conversation metadata |
 | `POST` | `/api/conversations/v2/outbox` | Enqueue opening message; pending idempotent replay also returns `202` |
 | `POST` | `/api/conversations/v2/outbox/drain` | Deprecated compatibility alias for the shared drain |
 | `GET`, `PATCH` | `/api/conversations/v2/{conversationId}` | Read; assign an unassigned null-version or already-V2 conversation |
+| `POST` | `/api/conversations/v2/{conversationId}/state` | Set conversation state by hand; no `Idempotency-Key` |
 | `POST` | `/api/conversations/v2/{conversationId}/messages` | Send reply |
 | `POST` | `/api/conversations/v2/{conversationId}/messages/outbox` | Enqueue reply; pending idempotent replay also returns `202` |
 | `GET` | `/api/conversations/v2/topics/{topicType}/{externalTopicId}` | Read by topic |
@@ -99,6 +101,10 @@ V2 mirrors the complete V1 conversation layout:
 12. Returned HTML is untrusted.
 13. `accepted` is provider API acceptance, not final delivery. Direct email has no read endpoint for later projected delivery state.
 14. Out-of-order row reconciliation preserves one-way V2 promotion and historical routing-token/base aliases when conversations merge.
+15. Conversation `state` is one of `awaiting_us`, `awaiting_participant`, `concluded`, `terminated`, with `stateChangedAt` and a derived `awaitingReply` boolean. Inbound sets `awaiting_us`; persisted outbound reply intent sets `awaiting_participant`; a bounced, complained, or suppressed outbound delivery sets `terminated`. `email.failed` is not terminal.
+16. `stateChangedAt` moves only when the state value changes, so `awaiting_us` records when the wait began.
+17. Automatic transitions never move `terminated`; inbound mail reopens `concluded`. Merges take `terminated` > `awaiting_us` > `awaiting_participant` > `concluded` with the earliest timestamp of the winning state.
+18. State transitions and the response fields apply to V1 and V2 conversations; only the summary and state routes are V2-only. The state route permits every transition and repeating one succeeds.
 
 ## Promotion
 

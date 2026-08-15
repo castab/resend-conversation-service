@@ -1,4 +1,5 @@
 export type {
+  ConversationState,
   EmailConversation,
   EmailMessage,
   EmailWebhookEvent,

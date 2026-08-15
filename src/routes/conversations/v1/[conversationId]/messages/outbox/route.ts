@@ -13,6 +13,7 @@ import {
   createReplySubject,
   hashSendRequest,
   isValidReplyToBaseAddress,
+  markConversationAwaitingParticipant,
   parseAddress,
 } from '@/lib/email';
 import { validateMessageBody } from '@/lib/send-validation';
@@ -181,6 +182,11 @@ export async function POST(
             updated_at = now()
         WHERE id = ${conversationId}::uuid
       `;
+      await markConversationAwaitingParticipant(
+        transaction,
+        conversationId,
+        now,
+      );
       return message;
     });
     return Response.json(

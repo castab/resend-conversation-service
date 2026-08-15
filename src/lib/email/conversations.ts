@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto';
 import type { EmailConversation, EmailMessage } from '@/lib/database';
 import { Prisma, type PrismaClient } from '@/lib/database';
+import {
+  markConversationAwaitingUs,
+  mergeConversationState,
+} from './conversation-state';
 import type { ResendEmail, ResendEmailClient } from './resend-client';
 import { extractRoutingCandidates } from './routing';
 import {
@@ -92,6 +96,7 @@ async function preserveMergedConversationState(
       ? 'V2'
       : (target.apiVersion ??
         uniqueSources.find((source) => source.apiVersion)?.apiVersion);
+  const mergedState = mergeConversationState([target, ...uniqueSources]);
   await transaction.emailConversation.update({
     where: { id: target.id },
     data: {
@@ -102,6 +107,7 @@ async function preserveMergedConversationState(
           ? (target.apiVersion === 'V2' && target.replyToRequiresAllowlist) ||
             Boolean(promotedSource?.replyToRequiresAllowlist)
           : target.replyToRequiresAllowlist,
+      ...(mergedState ?? {}),
     },
   });
 }
@@ -499,6 +505,8 @@ export async function projectInboundEmail(
               subject: normalizeSubject(email.subject),
               participantAddress: participant.address,
               participantName: displayFrom.name,
+              state: 'AWAITING_US',
+              stateChangedAt: emailCreatedAt,
               lastMessageAt: emailCreatedAt,
             },
           });
@@ -581,6 +589,11 @@ export async function projectInboundEmail(
               data: { lastMessageAt: latest._max.emailCreatedAt },
             });
           }
+          await markConversationAwaitingUs(
+            transaction,
+            conversation.id,
+            emailCreatedAt,
+          );
 
           return message;
         },

@@ -23,6 +23,7 @@ import {
   createReplySubject,
   createRoutingToken,
   hashSendRequest,
+  markConversationAwaitingParticipant,
   normalizeSubject,
 } from '@/lib/email';
 import {
@@ -340,6 +341,8 @@ async function reopenFailedConversation(
         participantName: input.value.participant.name,
         replyToBaseAddress: input.value.message.replyTo.address,
         replyToRequiresAllowlist: true,
+        state: 'AWAITING_PARTICIPANT',
+        stateChangedAt: input.now,
         lastMessageAt: input.now,
       },
     });
@@ -526,6 +529,11 @@ export async function createMessageV2(
             updated_at = now()
         WHERE id = ${conversationId}::uuid
       `;
+      await markConversationAwaitingParticipant(
+        transaction,
+        conversationId,
+        now,
+      );
       return message;
     });
   } catch (error) {

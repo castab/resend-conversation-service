@@ -128,10 +128,12 @@ When a V1 conversation is promoted, its existing persisted `RESEND_REPLY_TO` bas
 | `POST` | `/api/emails/v2/outbox/drain` | Deliver one shared direct/conversation outbox batch | `200` | `400`, `401`, `413`, `415`, `500` |
 | `POST` | `/api/conversations/v2` | Create and synchronously send an opening message | `201`, replay `200`/`202` | `400`, `401`, `409`, `413`, `415`, `500`, `502` |
 | `GET` | `/api/conversations/v2?assignment=unassigned` | List unassigned inbound conversations | `200` | `400`, `401`, `500` |
+| `GET` | `/api/conversations/v2/summary` | Count conversations per state and list those in the selected states | `200` | `400`, `401`, `500` |
 | `POST` | `/api/conversations/v2/outbox` | Persist and enqueue an opening message | `202`, replay `200`/`202` | `400`, `401`, `409`, `413`, `415`, `500`, `502` |
 | `POST` | `/api/conversations/v2/outbox/drain` | Deprecated compatibility alias for the shared drain | `200` | `400`, `401`, `413`, `415`, `500` |
 | `GET` | `/api/conversations/v2/{conversationId}` | Read a conversation by service ID | `200` | `400`, `401`, `404`, `500` |
 | `PATCH` | `/api/conversations/v2/{conversationId}` | Assign an unassigned null-version or V2 conversation and mark it V2 | `200` | `400`, `401`, `404`, `409`, `413`, `415`, `500` |
+| `POST` | `/api/conversations/v2/{conversationId}/state` | Set the conversation state by hand | `200` | `400`, `401`, `404`, `413`, `415`, `500` |
 | `POST` | `/api/conversations/v2/{conversationId}/messages` | Synchronously send a reply | `201`, replay `200`/`202` | `400`, `401`, `404`, `409`, `413`, `415`, `500`, `502`, `503` |
 | `POST` | `/api/conversations/v2/{conversationId}/messages/outbox` | Persist and enqueue a reply | `202`, replay `200`/`202` | `400`, `401`, `404`, `409`, `413`, `415`, `500`, `502`, `503` |
 | `GET` | `/api/conversations/v2/topics/{topicType}/{externalTopicId}` | Read by external topic | `200` | `400`, `401`, `404`, `500` |
@@ -300,6 +302,27 @@ Use the V2 GET routes with optional `limit` from 1 through 100 and `before=<mess
 Reads are not filtered by conversation API version. Reading a V1 conversation through V2 does not promote it, and reading a V2 conversation through deprecated V1 does not demote it.
 
 List unassigned inbound conversations with `GET /api/conversations/v2?assignment=unassigned`. Assign one with `PATCH /api/conversations/v2/{conversationId}` and body `{"topic":{...}}`. V2 assignment succeeds only while the conversation is unassigned and its API version is null or already V2; a successfully persisted assignment marks or preserves it as V2. A V1 conversation cannot be assigned through V2.
+
+### Track and clear replies
+
+Every conversation read includes `state`, `stateChangedAt`, and a derived `awaitingReply` boolean that is true exactly when `state` is `awaiting_us`.
+
+| State | Meaning | Set by |
+| --- | --- | --- |
+| `awaiting_us` | The participant wrote last and is waiting on a reply | Inbound mail |
+| `awaiting_participant` | We replied and are waiting on the participant | Persisting outbound reply intent, sent or enqueued |
+| `concluded` | The exchange is finished and needs no follow-up | Operators, through the state route |
+| `terminated` | The participant is unreachable, or an operator ended the thread | A bounced, complained, or suppressed outbound delivery, or the state route |
+
+`stateChangedAt` moves only when the state value itself changes, so a conversation waiting on a reply keeps the timestamp of the message that started the wait however many further messages arrive. Automatic transitions never move a `terminated` conversation; inbound mail reopens a `concluded` one. A send-side `email.failed` is not terminal, since it says nothing about whether the participant can be reached.
+
+`GET /api/conversations/v2/summary` returns `counts` for all four states regardless of any filter, `count` for the selected states, and a page of conversations ordered by oldest `stateChangedAt` first. Filter with `state`, repeated or comma-separated and matched case-insensitively; omit it to list every state. `?state=awaiting_us` is therefore a reply queue with the longest wait at the top. Paginate with `limit` from 1 through 100 and the opaque `page.before` cursor.
+
+Summary items carry conversation metadata only. There is deliberately no message payload; read messages from `GET /api/conversations/v2/{conversationId}`.
+
+Clear a conversation that needs no follow-up, such as a bare acknowledgement, with `POST /api/conversations/v2/{conversationId}/state` and body `{"state":"concluded"}`. Every state is settable and every transition is permitted, including reopening a `terminated` conversation. Setting the state a conversation already holds succeeds, so retries are safe. No email is sent, so this route takes no `Idempotency-Key`.
+
+State transitions apply to V1 and V2 conversations alike, and the fields appear on V1 reads. Only the summary and state routes are V2-only.
 
 ## V1 compatibility and promotion
 

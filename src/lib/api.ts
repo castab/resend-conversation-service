@@ -5,7 +5,10 @@ import {
   getPrismaClient,
   type Prisma,
 } from '@/lib/database';
-import { buildConversationReplyTo } from '@/lib/email';
+import {
+  buildConversationReplyTo,
+  serializeConversationState,
+} from '@/lib/email';
 import { resolveEmailV2ApiKey } from '@/lib/environment';
 
 export function authorize(request: Request): Response | null {
@@ -174,6 +177,9 @@ export function serializeConversation(
       conversation.replyToBaseAddress ?? process.env.RESEND_REPLY_TO ?? '',
       conversation.routingToken,
     ),
+    state: serializeConversationState(conversation.state),
+    stateChangedAt: conversation.stateChangedAt.toISOString(),
+    awaitingReply: conversation.state === 'AWAITING_US',
     lastMessageAt: conversation.lastMessageAt.toISOString(),
     createdAt: conversation.createdAt.toISOString(),
     updatedAt: conversation.updatedAt.toISOString(),

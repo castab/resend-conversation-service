@@ -7,6 +7,31 @@ Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Added a conversation `state` of `awaiting_us`, `awaiting_participant`,
+  `concluded`, or `terminated`, exposed on the conversation response together with
+  `stateChangedAt` and a derived `awaitingReply` boolean. Inbound mail moves a
+  conversation to `awaiting_us`; sending or enqueuing an outbound reply moves it to
+  `awaiting_participant`; a bounce, complaint, or suppression moves it to
+  `terminated`. Automatic transitions never move a `terminated` conversation, and
+  inbound mail reopens a `concluded` one.
+- Added `GET /api/conversations/v2/summary`, returning conversation counts for every
+  state and a filterable, paginated list of conversations with their participant,
+  subject, and state, ordered by oldest state change first. Items carry conversation
+  metadata only.
+- Added `POST /api/conversations/v2/{conversationId}/state` to set a conversation
+  state by hand, including marking a conversation `concluded` when it needs no
+  follow-up.
+
+### Migration
+
+- The conversation-state migration back-fills every conversation that existed before
+  the upgrade as `awaiting_participant`, that is, **not** awaiting a reply.
+  Conversations with unanswered inbound mail from before the upgrade will not appear
+  under `state=awaiting_us` until they receive new inbound mail. Operators who need
+  the historical backlog must re-derive it themselves.
+
 ## [0.4.0] - 2026-07-29
 
 ### Added

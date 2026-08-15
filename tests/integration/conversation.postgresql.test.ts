@@ -1041,6 +1041,398 @@ describe('Private conversation API', () => {
     expect([first.status, second.status].sort()).toEqual([200, 409]);
   });
 
+  it('opens a conversation awaiting the participant', async () => {
+    const created = await createConversation('state-open');
+    const response = await fetch(`${baseUrl}/${created.body.conversationId}`, {
+      headers: headers(),
+    });
+    const body = await response.json();
+    expect(body.state).toBe('awaiting_participant');
+    expect(body.awaitingReply).toBe(false);
+    expect(typeof body.stateChangedAt).toBe('string');
+  });
+
+  it('awaits us on inbound mail and keeps the first waiting timestamp', async () => {
+    const created = await createConversation('state-inbound');
+    await sendInbound(created.body.message.replyTo, 'state-inbound-1');
+    const first = await readState(created.body.conversationId);
+    expect(first.state).toBe('awaiting_us');
+    expect(first.awaitingReply).toBe(true);
+
+    await sendInbound(created.body.message.replyTo, 'state-inbound-2');
+    const second = await readState(created.body.conversationId);
+    expect(second.state).toBe('awaiting_us');
+    expect(second.stateChangedAt).toBe(first.stateChangedAt);
+  });
+
+  it('reopens a concluded conversation on inbound mail', async () => {
+    const created = await createConversation('state-reopen');
+    await setState(created.body.conversationId, 'concluded');
+    expect((await readState(created.body.conversationId)).state).toBe(
+      'concluded',
+    );
+
+    await sendInbound(created.body.message.replyTo, 'state-reopen-inbound');
+    expect((await readState(created.body.conversationId)).state).toBe(
+      'awaiting_us',
+    );
+  });
+
+  it('returns the turn to the participant on a V1 reply', async () => {
+    const created = await createConversation('state-v1-reply');
+    await sendInbound(created.body.message.replyTo, 'state-v1-reply-inbound');
+    expect((await readState(created.body.conversationId)).state).toBe(
+      'awaiting_us',
+    );
+
+    const reply = await fetch(
+      `${baseUrl}/${created.body.conversationId}/messages`,
+      {
+        method: 'POST',
+        headers: headers('state-v1-reply-send'),
+        body: JSON.stringify({ text: 'Replying now.' }),
+      },
+    );
+    expect(reply.status).toBe(201);
+    expect((await readState(created.body.conversationId)).state).toBe(
+      'awaiting_participant',
+    );
+  });
+
+  it('returns the turn to the participant on a V1 enqueued reply', async () => {
+    const created = await createConversation('state-v1-enqueue');
+    await sendInbound(created.body.message.replyTo, 'state-v1-enqueue-inbound');
+    expect((await readState(created.body.conversationId)).state).toBe(
+      'awaiting_us',
+    );
+
+    const reply = await fetch(
+      `${baseUrl}/${created.body.conversationId}/messages/outbox`,
+      {
+        method: 'POST',
+        headers: headers('state-v1-enqueue-send'),
+        body: JSON.stringify({ text: 'Queued reply.' }),
+      },
+    );
+    expect(reply.status).toBe(202);
+    expect((await readState(created.body.conversationId)).state).toBe(
+      'awaiting_participant',
+    );
+  });
+
+  it('returns the turn to the participant on V2 replies', async () => {
+    await allowAddress(V2_FROM, 'FROM');
+    await allowAddress(V2_REPLY_TO, 'REPLY_TO');
+    for (const [index, path] of ['messages', 'messages/outbox'].entries()) {
+      const createdResponse = await fetch(baseUrlV2, {
+        method: 'POST',
+        headers: v2Headers(`state-v2-open-${index}`),
+        body: JSON.stringify(v2CreateBody(`state-v2-${index}`)),
+      });
+      const created = await createdResponse.json();
+      await sendInbound(created.message.replyTo, `state-v2-inbound-${index}`);
+      expect((await readState(created.conversationId, true)).state).toBe(
+        'awaiting_us',
+      );
+
+      const reply = await fetch(
+        `${baseUrlV2}/${created.conversationId}/${path}`,
+        {
+          method: 'POST',
+          headers: v2Headers(`state-v2-reply-${index}`),
+          body: JSON.stringify({
+            text: 'Replying now.',
+            from: { address: V2_FROM },
+            replyTo: { address: V2_REPLY_TO },
+          }),
+        },
+      );
+      expect([201, 202]).toContain(reply.status);
+      expect((await readState(created.conversationId, true)).state).toBe(
+        'awaiting_participant',
+      );
+    }
+  });
+
+  it('terminates a conversation when its outbound message bounces', async () => {
+    const created = await createConversation('state-bounce');
+    const bounce = fixtures.email.bounced({
+      data: {
+        email_id: created.body.message.resendEmailId,
+        from: 'mailbox@example.com',
+        to: ['person@example.com'],
+        subject: 'Booking 4821',
+        created_at: '2026-08-15T09:00:00.000Z',
+        bounce: {
+          type: 'hard',
+          subType: 'permanent',
+          message: 'Mailbox not found',
+          diagnosticCode: ['550 5.1.1 User unknown'],
+        },
+      },
+    });
+    await postWebhook(bounce);
+    expect((await readState(created.body.conversationId)).state).toBe(
+      'terminated',
+    );
+  });
+
+  it('keeps a terminated conversation terminated through inbound mail', async () => {
+    const created = await createConversation('state-sticky');
+    await setState(created.body.conversationId, 'terminated');
+
+    await sendInbound(created.body.message.replyTo, 'state-sticky-inbound');
+    expect((await readState(created.body.conversationId)).state).toBe(
+      'terminated',
+    );
+
+    await setState(created.body.conversationId, 'awaiting_us');
+    expect((await readState(created.body.conversationId)).state).toBe(
+      'awaiting_us',
+    );
+  });
+
+  it('leaves conversations untouched when a direct email bounces', async () => {
+    const created = await createConversation('state-direct-bounce');
+    // A DIRECT message carries no conversation, so the bounce must terminate
+    // nothing even though a conversation exists alongside it.
+    await database.query(
+      `INSERT INTO email_messages
+        (kind, direction, state, delivery_state, resend_email_id,
+         from_address, to_address, subject, email_created_at, updated_at)
+       VALUES ('DIRECT', 'OUTBOUND', 'ACCEPTED', 'UNKNOWN', 'em_direct_only_bounce',
+               'mailbox@example.com', 'person@example.com', 'Direct', now(), now())`,
+    );
+    const bounce = fixtures.email.bounced({
+      data: {
+        email_id: 'em_direct_only_bounce',
+        from: 'mailbox@example.com',
+        to: ['person@example.com'],
+        subject: 'Direct',
+        created_at: '2026-08-15T09:05:00.000Z',
+        bounce: { type: 'hard', subType: 'permanent', message: 'Nope' },
+      },
+    });
+    await postWebhook(bounce);
+
+    const direct = await database.query<{ delivery_state: string }>(
+      'SELECT delivery_state FROM email_messages WHERE resend_email_id = $1',
+      ['em_direct_only_bounce'],
+    );
+    expect(direct.rows[0].delivery_state).toBe('BOUNCED');
+    expect((await readState(created.body.conversationId)).state).toBe(
+      'awaiting_participant',
+    );
+  });
+
+  it('summarizes conversation counts and filters by state', async () => {
+    const waiting = await createConversation('state-summary-waiting');
+    await sendInbound(waiting.body.message.replyTo, 'state-summary-inbound');
+    const settled = await createConversation(
+      'state-summary-settled',
+      createBodyForTopic('summary-settled'),
+    );
+
+    const all = await readSummary();
+    expect(all.counts).toEqual({
+      awaiting_us: 1,
+      awaiting_participant: 1,
+      concluded: 0,
+      terminated: 0,
+    });
+    expect(all.count).toBe(2);
+    expect(all.conversations).toHaveLength(2);
+
+    const queue = await readSummary('?state=awaiting_us');
+    expect(queue.count).toBe(queue.counts.awaiting_us);
+    expect(queue.conversations).toHaveLength(1);
+    expect(queue.conversations[0].id).toBe(waiting.body.conversationId);
+    expect(queue.conversations[0].awaitingReply).toBe(true);
+    expect(queue.conversations[0].participant.address).toBe(
+      'person@example.com',
+    );
+    expect(queue.conversations[0].subject).toBe('Booking 4821');
+    // The summary is metadata only; message payloads stay on the conversation read.
+    expect(queue.conversations[0]).not.toHaveProperty('lastMessage');
+    expect(queue.conversations[0]).not.toHaveProperty('text');
+    expect(queue.conversations[0]).not.toHaveProperty('html');
+
+    const combined = await readSummary(
+      '?state=awaiting_us,awaiting_participant',
+    );
+    expect(combined.count).toBe(2);
+    const repeated = await readSummary(
+      '?state=awaiting_us&state=awaiting_participant',
+    );
+    expect(repeated.count).toBe(2);
+    const uppercase = await readSummary('?state=AWAITING_US');
+    expect(uppercase.count).toBe(1);
+
+    expect(settled.body.conversationId).toBeDefined();
+  });
+
+  it('orders the summary by oldest state change and paginates', async () => {
+    const first = await createConversation('state-page-1');
+    const second = await createConversation(
+      'state-page-2',
+      createBodyForTopic('page-2'),
+    );
+    const third = await createConversation(
+      'state-page-3',
+      createBodyForTopic('page-3'),
+    );
+    const expected = [
+      first.body.conversationId,
+      second.body.conversationId,
+      third.body.conversationId,
+    ];
+
+    const page = await readSummary('?limit=2');
+    expect(page.conversations.map((entry: { id: string }) => entry.id)).toEqual(
+      expected.slice(0, 2),
+    );
+    expect(page.page.hasMore).toBe(true);
+
+    const next = await readSummary(
+      `?limit=2&before=${encodeURIComponent(page.page.before)}`,
+    );
+    expect(next.conversations.map((entry: { id: string }) => entry.id)).toEqual(
+      expected.slice(2),
+    );
+    expect(next.page.hasMore).toBe(false);
+  });
+
+  it('rejects an unknown summary state and cursor', async () => {
+    const unknownState = await fetch(`${baseUrlV2}/summary?state=nonsense`, {
+      headers: v2Headers(),
+    });
+    expect(unknownState.status).toBe(400);
+    const badCursor = await fetch(`${baseUrlV2}/summary?before=not-a-cursor`, {
+      headers: v2Headers(),
+    });
+    expect(badCursor.status).toBe(400);
+  });
+
+  it('sets conversation state by hand and stays idempotent', async () => {
+    const created = await createConversation('state-manual');
+    await sendInbound(created.body.message.replyTo, 'state-manual-inbound');
+    expect((await readSummary('?state=awaiting_us')).count).toBe(1);
+
+    const first = await setState(created.body.conversationId, 'concluded');
+    expect(first.status).toBe(200);
+    expect(first.body.state).toBe('concluded');
+    expect(first.body.awaitingReply).toBe(false);
+    expect((await readSummary('?state=awaiting_us')).count).toBe(0);
+
+    const repeat = await setState(created.body.conversationId, 'CONCLUDED');
+    expect(repeat.status).toBe(200);
+    expect(repeat.body.state).toBe('concluded');
+  });
+
+  it('validates the conversation state request', async () => {
+    const created = await createConversation('state-validation');
+    const invalid = await setState(created.body.conversationId, 'nonsense');
+    expect(invalid.status).toBe(400);
+
+    const empty = await fetch(
+      `${baseUrlV2}/${created.body.conversationId}/state`,
+      { method: 'POST', headers: v2Headers(), body: JSON.stringify({}) },
+    );
+    expect(empty.status).toBe(400);
+
+    const missing = await fetch(
+      `${baseUrlV2}/01a00428-22f0-7e98-8881-097423751599/state`,
+      {
+        method: 'POST',
+        headers: v2Headers(),
+        body: JSON.stringify({ state: 'concluded' }),
+      },
+    );
+    expect(missing.status).toBe(404);
+  });
+
+  it('requires the V2 credential on the state routes', async () => {
+    const created = await createConversation('state-auth');
+    for (const request of [
+      fetch(`${baseUrlV2}/summary`),
+      fetch(`${baseUrlV2}/summary`, { headers: headers() }),
+      fetch(`${baseUrlV2}/${created.body.conversationId}/state`, {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify({ state: 'concluded' }),
+      }),
+    ]) {
+      expect((await request).status).toBe(401);
+    }
+  });
+
+  async function postWebhook(event: unknown) {
+    const signed = signPayload(
+      TEST_CONFIG.webhookSecret,
+      event,
+      generateSvixId(),
+    );
+    const response = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: signed.headers,
+      body: signed.body,
+    });
+    expect(response.status).toBe(200);
+    return response;
+  }
+
+  async function sendInbound(replyTo: string, id: string) {
+    const event = fixtures.email.received({
+      data: {
+        email_id: `em_${id}`,
+        message_id: `<${id}@example.com>`,
+        from: 'person@example.com',
+        to: [replyTo],
+        subject: 'Re: Booking 4821',
+        created_at: new Date().toISOString(),
+      },
+    });
+    resendServer.received.set(event.data.email_id, {
+      id: event.data.email_id,
+      message_id: event.data.message_id as string,
+      from: event.data.from,
+      to: event.data.to,
+      subject: event.data.subject,
+      created_at: event.data.created_at,
+      text: 'Inbound message',
+      html: null,
+      headers: {},
+      reply_to: [],
+    });
+    return postWebhook(event);
+  }
+
+  async function readState(conversationId: string, v2 = false) {
+    const response = await fetch(
+      `${v2 ? baseUrlV2 : baseUrl}/${conversationId}`,
+      { headers: v2 ? v2Headers() : headers() },
+    );
+    expect(response.status).toBe(200);
+    return response.json();
+  }
+
+  async function readSummary(query = '') {
+    const response = await fetch(`${baseUrlV2}/summary${query}`, {
+      headers: v2Headers(),
+    });
+    expect(response.status).toBe(200);
+    return response.json();
+  }
+
+  async function setState(conversationId: string, state: string) {
+    const response = await fetch(`${baseUrlV2}/${conversationId}/state`, {
+      method: 'POST',
+      headers: v2Headers(),
+      body: JSON.stringify({ state }),
+    });
+    return { status: response.status, body: await response.json() };
+  }
+
   async function createConversation(
     idempotencyKey: string,
     body = createBody(),
