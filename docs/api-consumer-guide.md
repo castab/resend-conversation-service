@@ -20,21 +20,22 @@ The service does not provide browser authentication, contact management, attachm
 
 ## Version choice
 
-Use conversation API V2 for new conversation integrations. V2 is available under `/api/conversations/v2` and requires explicit authorized sender and Reply-To identities. Use `POST /api/emails/v2` or `POST /api/emails/v2/outbox` for synchronous or queued notification and system email that does not need a conversation.
+Conversation API V2 is the only conversation contract. It is available under `/api/conversations/v2` and requires explicit authorized sender and Reply-To identities. Use `POST /api/emails/v2` or `POST /api/emails/v2/outbox` for synchronous or queued notification and system email that does not need a conversation.
 
-Conversation API V1 remains available under `/api/conversations/v1` as a deprecated, frozen compatibility contract. There is no announced sunset. V1 continues to use only the server-configured `RESEND_FROM` and `RESEND_REPLY_TO`; callers cannot select V1 identities. New features belong in V2.
+Conversation API V1 was retired in 0.5.0. `/api/conversations/v1` and everything under it are no longer routed and return `404 {"error":"Not found"}`. Conversations it created are unaffected and continue to be served by V2.
 
 The health route is available at both `/api/health/v2` and `/api/health/v1`.
 `/api/health/v2` is the current path; `/api/health/v1` remains as a
 compatibility alias for existing readiness checks. Resend webhook ingress
-remains V1.
+remains `/api/webhooks/resend/v1`. Neither `v1` path is affected by the
+conversation V1 retirement.
 
 ## Authentication
 
 ### Conversation API V2
 
 - Send `Authorization: Bearer <EMAIL_v2_API_KEY>`.
-- The V2 credential is separate from V1 and from the drain credential.
+- The V2 credential is separate from the drain credential.
 - Operators may configure the credential with `EMAIL_v2_API_KEY` or the
   `EMAIL_V2_API_KEY` fallback. The mixed-case name takes precedence when both
   are nonempty.
@@ -42,17 +43,11 @@ remains V1.
 - Missing server-side credential configuration returns `500 {"error":"Server misconfiguration"}`.
 - The same credential authorizes both direct-email routes.
 
-### Deprecated conversation API V1
-
-- Send `Authorization: Bearer <CONVERSATION_API_KEY>`.
-- The V1 credential is not accepted by V2.
-- V1 remains authenticated even when deployed behind a private gateway.
-
 ### Outbox drain
 
 - Send `Authorization: Bearer <OUTBOX_DRAIN_API_KEY>`.
-- Neither conversation credential is accepted.
-- `/api/emails/v2/outbox/drain` is the current path. Both versioned conversation drain paths are deprecated compatibility aliases with no announced sunset. All three invoke the same shared behavior and use this dedicated credential.
+- The conversation credential is not accepted.
+- `/api/emails/v2/outbox/drain` is the only drain path. The conversation-namespaced alias was removed in 0.5.0.
 
 ### Webhooks
 
@@ -117,7 +112,7 @@ booking-replies+c_8f2a1b9d4f8c4fd2a7319df35a6c041e@mail.example.com
 
 Later V2 sends must provide the same base address, even if another `REPLY_TO` address is allowlisted. Callers provide only the base, never the generated tagged address. `replyTo.name` remains per-message and may change.
 
-When a V1 conversation is promoted, its existing persisted `RESEND_REPLY_TO` base remains fixed. The promoting V2 request must provide that exact normalized base and it must be currently allowlisted for `REPLY_TO`.
+When a `V1`-tagged conversation is promoted, its existing persisted Reply-To base remains fixed. The promoting V2 request must provide that exact normalized base and it must be currently allowlisted for `REPLY_TO`.
 
 ## V2 endpoints
 
@@ -130,7 +125,6 @@ When a V1 conversation is promoted, its existing persisted `RESEND_REPLY_TO` bas
 | `GET` | `/api/conversations/v2?assignment=unassigned` | List unassigned inbound conversations | `200` | `400`, `401`, `500` |
 | `GET` | `/api/conversations/v2/summary` | Count conversations per state and list those in the selected states | `200` | `400`, `401`, `500` |
 | `POST` | `/api/conversations/v2/outbox` | Persist and enqueue an opening message | `202`, replay `200`/`202` | `400`, `401`, `409`, `413`, `415`, `500`, `502` |
-| `POST` | `/api/conversations/v2/outbox/drain` | Deprecated compatibility alias for the shared drain | `200` | `400`, `401`, `413`, `415`, `500` |
 | `GET` | `/api/conversations/v2/{conversationId}` | Read a conversation by service ID | `200` | `400`, `401`, `404`, `500` |
 | `PATCH` | `/api/conversations/v2/{conversationId}` | Assign an unassigned null-version or V2 conversation and mark it V2 | `200` | `400`, `401`, `404`, `409`, `413`, `415`, `500` |
 | `POST` | `/api/conversations/v2/{conversationId}/state` | Set the conversation state by hand | `200` | `400`, `401`, `404`, `413`, `415`, `500` |
@@ -188,7 +182,7 @@ New provider acceptance returns `201`:
 
 Use `POST /api/emails/v2/outbox` with the same body and a different globally unique idempotency key to queue delivery. A new enqueue returns `202` with `state: "pending"` and `resendEmailId: null` without calling Resend. Replay the same normalized queued request and key to reconcile state: pending remains `202`, accepted returns `200`, and failed or indeterminate returns `502`. A synchronous and queued request cannot share one idempotency key.
 
-There is no V1 or direct-email GET operation. Lifecycle webhooks continue to update persisted direct intent, but later delivery state is not exposed by a read endpoint.
+There is no direct-email GET operation. Lifecycle webhooks continue to update persisted direct intent, but later delivery state is not exposed by a read endpoint.
 
 ## V2 workflows
 
@@ -238,9 +232,9 @@ Send `POST /api/conversations/v2` with a unique `Idempotency-Key`:
 }
 ```
 
-At least one nonempty `message.text` or `message.html` value is required. Each body is limited to 1 MiB. Optional `message.to` may be one recipient identity or an array of up to 50 recipient identities; if omitted, the opening email is sent to `participant`. Optional `message.tags` are forwarded to Resend and are limited to 10 nonblank `{name,value}` pairs. V2 rejects the V1 `message.replyToName` property; use `message.replyTo.name`.
+At least one nonempty `message.text` or `message.html` value is required. Each body is limited to 1 MiB. Optional `message.to` may be one recipient identity or an array of up to 50 recipient identities; if omitted, the opening email is sent to `participant`. Optional `message.tags` are forwarded to Resend and are limited to 10 nonblank `{name,value}` pairs. The retired `message.replyToName` property is rejected; use `message.replyTo.name`.
 
-The service creates one conversation per topic. If all messages in an existing topic conversation are `failed`, V2 may reopen it with a new idempotency key. Reopening a failed V1 conversation promotes it to V2 only when its fixed Reply-To base is absent or equals the requested base.
+The service creates one conversation per topic. If all messages in an existing topic conversation are `failed`, V2 may reopen it with a new idempotency key. Reopening a failed `V1`-tagged conversation promotes it to V2 only when its fixed Reply-To base is absent or equals the requested base.
 
 ### Send a reply
 
@@ -279,7 +273,7 @@ Send `POST /api/conversations/v2/{conversationId}/messages`:
 
 `replyToMessageId` is optional. When omitted, the service selects the latest `accepted` or `received` message. Optional `to` recipients override the outbound recipient list for that reply only; if omitted, the reply is sent to the conversation participant. Optional `tags` are forwarded to Resend and have the same limits as opening-message tags. An explicit parent must belong to the conversation. A reply is never sent without a parent RFC `Message-ID`; `In-Reply-To` uses that ID and `References` uses the parent's stored ancestry followed by the parent ID.
 
-A V2 reply to a V1 conversation atomically promotes the conversation when the send intent is successfully persisted. This applies to synchronous and enqueue replies. For a synchronous reply, promotion is committed before the provider call and remains in effect if that call subsequently returns `502`; provider acceptance is not required. A request that fails before send-intent persistence does not promote state.
+A V2 reply to a `V1`-tagged conversation atomically promotes the conversation when the send intent is successfully persisted. This applies to synchronous and enqueue replies. For a synchronous reply, promotion is committed before the provider call and remains in effect if that call subsequently returns `502`; provider acceptance is not required. A request that fails before send-intent persistence does not promote state.
 
 ### Enqueue and drain
 
@@ -293,15 +287,15 @@ Enqueue returns `202` after atomically persisting intent and its outbox entry. A
 }
 ```
 
-The current scheduler path is `POST /api/emails/v2/outbox/drain`. The V1 and V2 conversation drain paths remain equivalent deprecated aliases with no announced sunset. The drain processes at most one persistent batch per request. Direct, V1 conversation, and V2 conversation intent share global ordering and may occupy one fixed batch, including shared retry and batch-level terminal outcomes. A drain response can return `200` while reporting failed, retried, or indeterminate item state. Schedule one alias, not all aliases.
+The scheduler path is `POST /api/emails/v2/outbox/drain`, the only drain route. The drain processes at most one persistent batch per request. Direct and conversation intent share global ordering and may occupy one fixed batch, including shared retry and batch-level terminal outcomes. A drain response can return `200` while reporting failed, retried, or indeterminate item state.
 
 ### Read and assign
 
 Use the V2 GET routes with optional `limit` from 1 through 100 and `before=<message UUID>`. Messages are chronological within each returned page. `page.before` points to older messages.
 
-Reads are not filtered by conversation API version. Reading a V1 conversation through V2 does not promote it, and reading a V2 conversation through deprecated V1 does not demote it.
+Reads are not filtered by conversation API version. Reading a `V1`-tagged conversation through V2 does not promote it.
 
-List unassigned inbound conversations with `GET /api/conversations/v2?assignment=unassigned`. Assign one with `PATCH /api/conversations/v2/{conversationId}` and body `{"topic":{...}}`. V2 assignment succeeds only while the conversation is unassigned and its API version is null or already V2; a successfully persisted assignment marks or preserves it as V2. A V1 conversation cannot be assigned through V2.
+List unassigned inbound conversations with `GET /api/conversations/v2?assignment=unassigned`. Assign one with `PATCH /api/conversations/v2/{conversationId}` and body `{"topic":{...}}`. V2 assignment succeeds only while the conversation is unassigned and its API version is null or already V2; a successfully persisted assignment marks or preserves it as V2.
 
 ### Track and clear replies
 
@@ -322,13 +316,13 @@ Summary items carry conversation metadata only. There is deliberately no message
 
 Clear a conversation that needs no follow-up, such as a bare acknowledgement, with `POST /api/conversations/v2/{conversationId}/state` and body `{"state":"concluded"}`. Every state is settable and every transition is permitted, including reopening a `terminated` conversation. Setting the state a conversation already holds succeeds, so retries are safe. No email is sent, so this route takes no `Idempotency-Key`.
 
-State transitions apply to V1 and V2 conversations alike, and the fields appear on V1 reads. Only the summary and state routes are V2-only.
+State transitions are driven by mail flow rather than by the route that triggered them, so they apply equally to conversations created before the V1 retirement.
 
-## V1 compatibility and promotion
+## Retired conversation API V1
 
-V1 mirrors the same route layout and response models but remains frozen around environment-selected identities:
+Conversation API V1 was removed in 0.5.0. These paths are no longer routed and return `404 {"error":"Not found"}`:
 
-| Method | V1 path |
+| Method | Retired path |
 | --- | --- |
 | `POST`, `GET` | `/api/conversations/v1` |
 | `POST` | `/api/conversations/v1/outbox` |
@@ -338,22 +332,22 @@ V1 mirrors the same route layout and response models but remains frozen around e
 | `POST` | `/api/conversations/v1/{conversationId}/messages/outbox` |
 | `GET` | `/api/conversations/v1/topics/{topicType}/{externalTopicId}` |
 
-V1 opening messages accept `message.replyToName`; V1 replies accept top-level `replyToName`. V1 does not accept caller-selected `from` or `replyTo` behavior as part of its contract.
+`CONVERSATION_API_KEY` and `RESEND_FROM` are no longer read. `GET /api/health/v1` and `POST /api/webhooks/resend/v1` are unrelated to this retirement and remain available.
 
-Promotion is one-way:
+To migrate, move each call to the corresponding `/api/conversations/v2` path, swap the credential for `EMAIL_v2_API_KEY`, add structured `from` and `replyTo` identities to every send and enqueue request, and replace `replyToName` with `replyTo.name`. Both addresses must hold exact role-specific allowlist rows.
 
-- Successfully persisting a synchronous or queued V2 reply intent promotes an existing V1 conversation; provider acceptance is not required.
-- Reopening an all-failed V1 topic through V2 promotes it when the new V2 intent is persisted.
+### Conversations created before the retirement
+
+Existing conversations stored with `apiVersion = V1` are fully readable and writable through V2. Their fixed Reply-To base is preserved, so a V2 write must supply that exact base and it must be currently allowlisted for `REPLY_TO`.
+
+Promotion to V2 is one-way:
+
+- Successfully persisting a synchronous or queued V2 reply intent promotes the conversation; provider acceptance is not required.
+- Reopening an all-failed `V1`-tagged topic through V2 promotes it when the new V2 intent is persisted.
 - V2 assignment accepts an unassigned null-version or already-V2 conversation and persists it as V2.
 - A later `502` from a synchronous provider call does not roll back a promotion already committed with the V2 intent.
 - V2 reads do not promote.
-- V1 reads remain available after promotion.
-- New V1 synchronous and outbox reply intents after promotion return `409 {"error":"Conversation requires API v2"}`; replay of an already-persisted idempotent V1 intent can still return its stored state.
-- V1 assignment of a V2 conversation returns the same `409` error.
-- A new V1 opening intent cannot reopen an all-failed conversation already marked V2; replay of an existing stored intent remains idempotent.
-- No operation demotes V2 to V1.
-
-There is no sunset date for V1. Consumers should migrate writes to V2 rather than depend on future V1 extensions.
+- No operation demotes a conversation to `V1`.
 
 ## Request conventions
 
@@ -416,14 +410,14 @@ Outbound `deliveryState` is projected later from Resend lifecycle webhooks. `del
 | `400` | Invalid JSON, headers, IDs, filters, payload, V2 identity authorization, or fixed Reply-To mismatch | Change the request; do not probe identity policy |
 | `401` | Missing or invalid credential/signature | Correct credentials or signature |
 | `404` | Conversation, topic conversation, or reply parent missing | Retry only after state or identifier changes |
-| `409` | Idempotency conflict, topic/assignment conflict, missing parent RFC ID, or V1 write after promotion | Reconcile state or change the logical request |
+| `409` | Idempotency conflict, topic/assignment conflict, or missing parent RFC ID | Reconcile state or change the logical request |
 | `413` | Raw JSON body exceeds the 2100 KB transport limit | Reduce the request; do not retry unchanged |
 | `415` | Compressed request body | Remove `Content-Encoding` compression and resend uncompressed JSON |
 | `500` | Misconfiguration, persistence, projection, retrieval, or uncaught infrastructure failure | Retry only when safe and idempotent |
 | `502` | Provider rejection or indeterminate send outcome after persistence | Reuse the same key; never immediately create a new logical send |
 | `503` | Parent threading metadata retrieval failed | Retry later with backoff and the same logical request |
 
-For every synchronous or enqueue retry, reuse the original `Idempotency-Key` and the same normalized request. Keys are globally unique across direct email, V1, V2, synchronous, and outbox operations and are retained indefinitely. The operation kind is included in normalized request hashing, so a key is not portable between route families, versions, or delivery modes.
+For every synchronous or enqueue retry, reuse the original `Idempotency-Key` and the same normalized request. Keys are globally unique across direct email, conversation, synchronous, and outbox operations and are retained indefinitely. The operation kind is included in normalized request hashing, so a key is not portable between route families, versions, or delivery modes.
 
 Same key plus the same normalized request returns stored state. Same key plus a different normalized request returns `409`. The service persists intent before provider calls. Do not generate a new key merely because the client timed out or received `502`.
 
@@ -446,9 +440,8 @@ Consumers need the deployed base URL and the credential for their route family. 
 - `DATABASE_URL`
 - `RESEND_API_KEY`
 - `RESEND_WEBHOOK_SECRET`
-- `RESEND_FROM` and `RESEND_REPLY_TO` for frozen V1 behavior
-- `CONVERSATION_API_KEY` for V1
-- `EMAIL_v2_API_KEY` for V2, or `EMAIL_V2_API_KEY` as a fallback
+- `RESEND_REPLY_TO` as the Reply-To base for inbound routing-token validation
+- `EMAIL_v2_API_KEY`, or `EMAIL_V2_API_KEY` as a fallback
 - `OUTBOX_DRAIN_API_KEY` for the shared drain
 
 V2 additionally requires database allowlist rows for each approved canonical address and role. Keep allowlist changes in controlled database administration; no application management API exists.
@@ -494,12 +487,12 @@ curl -i \
 
 ## Compatibility and known gaps
 
-- Current conversation API: V2; deprecated frozen compatibility API: V1 with no announced sunset.
+- Current conversation API: V2. Conversation API V1 was retired in 0.5.0 and its paths return `404`.
 - OpenAPI version: `3.1.1`.
-- Contract/package version observed in repository: `0.4.0`.
+- Contract/package version observed in repository: `0.5.0`.
 - No browser-safe authentication or correlation/request ID is defined.
 - Gateway exposure policy is deployment-owned and not included in this contract.
 - Topic lookup does not enforce the documented 255-character `externalTopicId` limit although create and assignment do; consumers must follow the stricter contract.
 - Runtime webhook family validation is broader than the documented event enums; only documented events are supported.
-- Health readiness now depends on both V1 and V2 credentials, even for deployments whose consumers use only one conversation version.
-- V2 integration coverage confirms credential separation, structured identity validation, role separation, generic rejection, alias preservation, V1 reply promotion, post-promotion V1 write rejection, allowlist revocation behavior, fixed Reply-To base behavior, and V2 token-based inbound routing. Full V2 route-by-route parity is primarily established by direct route mirroring rather than distinct tests for every mirror endpoint.
+- Health readiness depends on `EMAIL_v2_API_KEY`, `OUTBOX_DRAIN_API_KEY`, and a valid `RESEND_REPLY_TO` base.
+- Integration coverage confirms credential separation, structured identity validation, role separation, generic rejection, alias preservation, promotion of `V1`-tagged conversations, allowlist revocation behavior, fixed Reply-To base behavior, and token-based inbound routing.

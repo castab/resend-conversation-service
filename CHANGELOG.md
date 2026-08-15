@@ -2,10 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
-The format is based on Keep a Changelog, and this project uses Semantic
-Versioning.
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project uses [Semantic Versioning](https://semver.org/). See
+[docs/releasing.md](docs/releasing.md) for how versions are chosen.
 
 ## [Unreleased]
+
+## [0.5.0] - 2026-08-15
 
 ### Added
 
@@ -24,6 +27,50 @@ Versioning.
   state by hand, including marking a conversation `concluded` when it needs no
   follow-up.
 
+### Removed
+
+- **Breaking.** Removed conversation API V1. `POST` and `GET
+  /api/conversations/v1`, `/api/conversations/v1/outbox`,
+  `/api/conversations/v1/outbox/drain`,
+  `/api/conversations/v1/{conversationId}`, its `/messages` and
+  `/messages/outbox` routes, and
+  `/api/conversations/v1/topics/{topicType}/{externalTopicId}` are no longer
+  routed and return `404 {"error":"Not found"}`. Callers migrate to the
+  corresponding `/api/conversations/v2` paths, which require the
+  `EMAIL_v2_API_KEY` credential and structured `from` and `replyTo` identities
+  authorized by exact role-specific allowlist rows; `replyToName` becomes
+  `replyTo.name`.
+- Removed the `CONVERSATION_API_KEY` and `RESEND_FROM` environment variables.
+  Both are no longer read, and health readiness no longer requires them.
+  `RESEND_REPLY_TO` is retained as the Reply-To base for inbound routing-token
+  validation.
+- Removed the `bearerAuth` security scheme from `public/openapi.json`.
+  `emailV2Auth` is now the spec-wide default.
+- **Breaking.** Removed `POST /api/conversations/v2/outbox/drain`, the
+  compatibility alias deprecated in 0.4.0. `POST /api/emails/v2/outbox/drain` is
+  now the only drain route. Behavior, request and response shapes, and the
+  `OUTBOX_DRAIN_API_KEY` credential are unchanged.
+
+  **Operators must repoint the scheduled drain caller before deploying.** A
+  scheduler still calling the conversation-namespaced path receives `404`, and
+  because nothing else reports a drain failure, queued email accumulates in the
+  outbox instead of surfacing an error. Deployments provisioned before 0.4.0 are
+  the most likely to still be on the old path.
+
+`GET /api/health/v1` and `POST /api/webhooks/resend/v1` are unrelated to this
+retirement and are unchanged.
+
+### Changed
+
+- Moved the shared outbox drain implementation to
+  `POST /api/emails/v2/outbox/drain`, which previously re-exported it from the
+  V1 route tree.
+- Documented [Semantic Versioning 2.0.0](https://semver.org/) as the governing
+  versioning guideline, with links from `README.md`, `CHANGELOG.md`, and
+  `docs/releasing.md`. `docs/releasing.md` now explains why pre-`1.0.0`
+  breaking changes stay in `0.x.0` and records what should be true before
+  publishing `1.0.0`.
+
 ### Migration
 
 - The conversation-state migration back-fills every conversation that existed before
@@ -31,6 +78,10 @@ Versioning.
   Conversations with unanswered inbound mail from before the upgrade will not appear
   under `state=awaiting_us` until they receive new inbound mail. Operators who need
   the historical backlog must re-derive it themselves.
+- The V1 retirement ships no database migration. Conversations created through V1
+  keep `api_version = 'V1'` and their fixed Reply-To base, remain readable and
+  writable through V2, and are still promoted to `V2` on the first authorized V2
+  write.
 
 ## [0.4.0] - 2026-07-29
 

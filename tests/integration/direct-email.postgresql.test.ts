@@ -350,7 +350,7 @@ describe('Direct email API v2', () => {
     expect(resendServer.sends).toHaveLength(1);
   });
 
-  it('freezes direct outbox authorization and supports existing drain aliases', async () => {
+  it('freezes direct outbox authorization at persistence', async () => {
     await allowAddress('system@example.com', 'FROM');
     const queued = await enqueue('direct-revoked-outbox');
     expect(queued.status).toBe(202);
@@ -364,17 +364,7 @@ describe('Direct email API v2', () => {
     const deniedNewIntent = await enqueue('direct-revoked-outbox-new');
     expect(deniedNewIntent.status).toBe(400);
 
-    const drained = await fetch(
-      `${TEST_CONFIG.appBaseUrl}/api/conversations/v2/outbox/drain`,
-      {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${TEST_CONFIG.outboxDrainApiKey}`,
-          'content-type': 'application/json',
-        },
-        body: '{}',
-      },
-    );
+    const drained = await drain(TEST_CONFIG.outboxDrainApiKey, {});
     expect(drained.status).toBe(200);
     expect((await drained.json()).accepted).toBe(1);
     expect(resendServer.batches[0].inputs[0].reply_to).toBeUndefined();
@@ -382,12 +372,13 @@ describe('Direct email API v2', () => {
 
   it('drains direct and conversation intent in one ordered email batch', async () => {
     await allowAddress('system@example.com', 'FROM');
+    await allowAddress(TEST_CONFIG.replyToBaseAddress, 'REPLY_TO');
     const conversation = await fetch(
-      `${TEST_CONFIG.appBaseUrl}/api/conversations/v1/outbox`,
+      `${TEST_CONFIG.appBaseUrl}/api/conversations/v2/outbox`,
       {
         method: 'POST',
         headers: {
-          authorization: `Bearer ${TEST_CONFIG.conversationApiKey}`,
+          authorization: `Bearer ${TEST_CONFIG.emailV2ApiKey}`,
           'content-type': 'application/json',
           'idempotency-key': 'mixed-conversation-outbox',
         },
@@ -398,7 +389,11 @@ describe('Direct email API v2', () => {
             title: 'Mixed outbox',
           },
           participant: { email: 'conversation@example.com' },
-          message: { text: 'Conversation email' },
+          message: {
+            text: 'Conversation email',
+            from: { address: 'system@example.com' },
+            replyTo: { address: TEST_CONFIG.replyToBaseAddress },
+          },
         }),
       },
     );
@@ -439,7 +434,7 @@ describe('Direct email API v2', () => {
     });
   });
 
-  it('retries direct intent through another shared drain alias', async () => {
+  it('retries direct intent through the shared drain', async () => {
     await allowAddress('system@example.com', 'FROM');
     const queued = await enqueue('direct-outbox-retry');
     expect(queued.status).toBe(202);
@@ -456,17 +451,7 @@ describe('Direct email API v2', () => {
     await database.query(
       'UPDATE email_outbox_batches SET next_attempt_at = now()',
     );
-    const retry = await fetch(
-      `${TEST_CONFIG.appBaseUrl}/api/conversations/v2/outbox/drain`,
-      {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${TEST_CONFIG.outboxDrainApiKey}`,
-          'content-type': 'application/json',
-        },
-        body: '{}',
-      },
-    );
+    const retry = await drain(TEST_CONFIG.outboxDrainApiKey, {});
     expect(retry.status).toBe(200);
     expect((await retry.json()).accepted).toBe(1);
     expect(resendServer.batches).toHaveLength(1);
@@ -479,12 +464,13 @@ describe('Direct email API v2', () => {
     const direct = await send('cross-operation-key');
     expect(direct.status).toBe(201);
 
+    await allowAddress(TEST_CONFIG.replyToBaseAddress, 'REPLY_TO');
     const conversation = await fetch(
-      `${TEST_CONFIG.appBaseUrl}/api/conversations/v1`,
+      `${TEST_CONFIG.appBaseUrl}/api/conversations/v2`,
       {
         method: 'POST',
         headers: {
-          authorization: `Bearer ${TEST_CONFIG.conversationApiKey}`,
+          authorization: `Bearer ${TEST_CONFIG.emailV2ApiKey}`,
           'content-type': 'application/json',
           'idempotency-key': 'cross-operation-key',
         },
@@ -495,7 +481,11 @@ describe('Direct email API v2', () => {
             title: 'Cross operation',
           },
           participant: { email: 'person@example.com' },
-          message: { text: 'Conversation message' },
+          message: {
+            text: 'Conversation message',
+            from: { address: 'system@example.com' },
+            replyTo: { address: TEST_CONFIG.replyToBaseAddress },
+          },
         }),
       },
     );

@@ -64,9 +64,7 @@ jobs:
           RESEND_WEBHOOK_SECRET: whsec_dGVzdF9zZWNyZXRfa2V5X2Zvcl90ZXN0aW5nXzEyMzQ=
           RESEND_API_KEY: test-resend-api-key
           RESEND_API_BASE_URL: http://localhost:4010
-          RESEND_FROM: "Test Mailbox <mailbox@example.com>"
           RESEND_REPLY_TO: mailbox@replies.example.com
-          CONVERSATION_API_KEY: test-conversation-api-key
           EMAIL_V2_API_KEY: test-conversation-v2-api-key
           OUTBOX_DRAIN_API_KEY: test-outbox-drain-api-key
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/resend_test
@@ -85,9 +83,7 @@ jobs:
           RESEND_WEBHOOK_SECRET: whsec_dGVzdF9zZWNyZXRfa2V5X2Zvcl90ZXN0aW5nXzEyMzQ=
           RESEND_API_KEY: test-resend-api-key
           RESEND_API_BASE_URL: http://localhost:4010
-          RESEND_FROM: "Test Mailbox <mailbox@example.com>"
           RESEND_REPLY_TO: mailbox@replies.example.com
-          CONVERSATION_API_KEY: test-conversation-api-key
           EMAIL_V2_API_KEY: test-conversation-v2-api-key
           OUTBOX_DRAIN_API_KEY: test-outbox-drain-api-key
           APP_BASE_URL: http://localhost:3000
@@ -107,9 +103,7 @@ jobs:
             -e DATABASE_URL=postgres://postgres:postgres@localhost:5432/resend_test \
             -e RESEND_API_KEY=test-resend-api-key \
             -e RESEND_WEBHOOK_SECRET=whsec_dGVzdF9zZWNyZXRfa2V5X2Zvcl90ZXN0aW5nXzEyMzQ= \
-            -e RESEND_FROM="Test Mailbox <mailbox@example.com>" \
             -e RESEND_REPLY_TO=mailbox@replies.example.com \
-            -e CONVERSATION_API_KEY=test-conversation-api-key \
             -e EMAIL_V2_API_KEY=test-conversation-v2-api-key \
             -e OUTBOX_DRAIN_API_KEY=test-outbox-drain-api-key \
             resend-service:test
@@ -119,5 +113,6 @@ jobs:
           done
           curl --fail --silent http://localhost:3100/api/health/v1 > /dev/null || (docker logs resend-service-smoke && exit 1)
           curl --fail --silent http://localhost:3100/openapi.json > /dev/null
-          test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://localhost:3100/api/conversations/v1?assignment=unassigned)" = "401"
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://localhost:3100/api/conversations/v2?assignment=unassigned)" = "401"
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://localhost:3100/api/conversations/v1?assignment=unassigned)" = "404"
           docker rm -f resend-service-smoke
