@@ -9,8 +9,7 @@ import { generateSvixId, signPayload } from '../helpers/svix';
 describe('Private conversation API', () => {
   const resendServer = new FakeResendServer();
   const database = new Client({ connectionString: TEST_CONFIG.postgresql.url });
-  const baseUrl = `${TEST_CONFIG.appBaseUrl}/api/conversations/v1`;
-  const baseUrlV2 = `${TEST_CONFIG.appBaseUrl}/api/conversations/v2`;
+  const baseUrl = `${TEST_CONFIG.appBaseUrl}/api/conversations/v2`;
   const webhookUrl = `${TEST_CONFIG.appBaseUrl}/api/webhooks/resend/v1`;
 
   beforeAll(async () => {
@@ -36,6 +35,33 @@ describe('Private conversation API', () => {
   it('requires bearer authentication', async () => {
     const response = await fetch(`${baseUrl}?assignment=unassigned`);
     expect(response.status).toBe(401);
+  });
+
+  it('no longer routes the retired conversation V1 surface', async () => {
+    const v1BaseUrl = `${TEST_CONFIG.appBaseUrl}/api/conversations/v1`;
+    for (const request of [
+      fetch(`${v1BaseUrl}?assignment=unassigned`, { headers: headers() }),
+      fetch(v1BaseUrl, {
+        method: 'POST',
+        headers: headers('retired-v1-create'),
+        body: JSON.stringify(createBody()),
+      }),
+      fetch(`${v1BaseUrl}/outbox`, {
+        method: 'POST',
+        headers: headers('retired-v1-enqueue'),
+        body: JSON.stringify(createBody()),
+      }),
+      fetch(`${v1BaseUrl}/outbox/drain`, {
+        method: 'POST',
+        headers: drainHeaders(),
+        body: JSON.stringify({ limit: 10 }),
+      }),
+      fetch(`${v1BaseUrl}/topics/booking/4821`, { headers: headers() }),
+    ]) {
+      const response = await request;
+      expect(response.status).toBe(404);
+      await expect(response.json()).resolves.toEqual({ error: 'Not found' });
+    }
   });
 
   it('resolves the V2 API key alias with mixed-case precedence', () => {
@@ -67,7 +93,7 @@ describe('Private conversation API', () => {
     const missingKey = await fetch(baseUrl, {
       method: 'POST',
       headers: {
-        authorization: `Bearer ${TEST_CONFIG.conversationApiKey}`,
+        authorization: `Bearer ${TEST_CONFIG.emailV2ApiKey}`,
         'content-type': 'application/json',
       },
       body: '{',
@@ -125,7 +151,7 @@ describe('Private conversation API', () => {
       {
         method: 'POST',
         headers: headers('reply-booking-4821'),
-        body: JSON.stringify({ text: 'This is the reply.' }),
+        body: JSON.stringify(replyBody('This is the reply.')),
       },
     );
     const reply = await replyResponse.json();
@@ -159,7 +185,12 @@ describe('Private conversation API', () => {
   it('formats per-message Reply-To aliases for Resend', async () => {
     const created = await createConversation(
       'reply-to-alias-opening',
-      createBody('Booking 4821', { replyToName: 'Brayan "Bookings"' }),
+      createBody('Booking 4821', {
+        replyTo: {
+          address: TEST_CONFIG.replyToBaseAddress,
+          name: 'Brayan "Bookings"',
+        },
+      }),
     );
 
     expect(created.response.status).toBe(201);
@@ -174,10 +205,14 @@ describe('Private conversation API', () => {
       {
         method: 'POST',
         headers: headers('reply-to-alias-reply'),
-        body: JSON.stringify({
-          text: 'This is the reply.',
-          replyToName: 'Support Team',
-        }),
+        body: JSON.stringify(
+          replyBody('This is the reply.', {
+            replyTo: {
+              address: TEST_CONFIG.replyToBaseAddress,
+              name: 'Support Team',
+            },
+          }),
+        ),
       },
     );
     const reply = await replyResponse.json();
@@ -195,29 +230,61 @@ describe('Private conversation API', () => {
       method: 'POST',
       headers: headers('unsafe-reply-to-alias'),
       body: JSON.stringify(
-        createBody('Booking 4821', { replyToName: 'Brayan\r\nBcc: x@y.test' }),
+        createBody('Booking 4821', {
+          replyTo: {
+            address: TEST_CONFIG.replyToBaseAddress,
+            name: 'Brayan\r\nBcc: x@y.test',
+          },
+        }),
       ),
     });
     const body = await response.json();
 
     expect(response.status).toBe(400);
     expect(body.error).toBe(
-      'message.replyToName must be a header-safe string of at most 256 characters',
+      'message.replyTo.name must be a header-safe string of at most 256 characters',
     );
   });
 
-  it('requires the dedicated V2 credential and structured identities', async () => {
-    const legacyCredential = await fetch(baseUrlV2, {
+  it('rejects the retired V1 replyToName field', async () => {
+    const response = await fetch(baseUrl, {
       method: 'POST',
-      headers: headers('v2-legacy-credential'),
+      headers: headers('retired-reply-to-name'),
+      body: JSON.stringify(
+        createBody('Booking 4821', { replyToName: 'Support Team' }),
+      ),
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: 'message.replyToName is not supported in API v2',
+    });
+  });
+
+  it('requires the dedicated V2 credential and structured identities', async () => {
+    const wrongCredential = await fetch(baseUrl, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${TEST_CONFIG.outboxDrainApiKey}`,
+        'content-type': 'application/json',
+        'idempotency-key': 'v2-wrong-credential',
+      },
       body: JSON.stringify(v2CreateBody('v2-auth')),
     });
-    expect(legacyCredential.status).toBe(401);
+    expect(wrongCredential.status).toBe(401);
 
-    const missingIdentity = await fetch(baseUrlV2, {
+    const missingIdentity = await fetch(baseUrl, {
       method: 'POST',
-      headers: v2Headers('v2-missing-identity'),
-      body: JSON.stringify(createBodyForTopic('v2-missing-identity')),
+      headers: headers('v2-missing-identity'),
+      body: JSON.stringify({
+        topic: {
+          type: 'booking',
+          externalId: 'v2-missing-identity',
+          title: 'Booking v2-missing-identity',
+        },
+        participant: { email: 'person@example.com', name: 'Person' },
+        message: { text: 'Opening message' },
+      }),
     });
     expect(missingIdentity.status).toBe(400);
     await expect(missingIdentity.json()).resolves.toEqual({
@@ -227,9 +294,9 @@ describe('Private conversation API', () => {
 
   it('authorizes V2 addresses by role and preserves display aliases', async () => {
     const input = v2CreateBody('v2-identities');
-    const denied = await fetch(baseUrlV2, {
+    const denied = await fetch(baseUrl, {
       method: 'POST',
-      headers: v2Headers('v2-identities-denied'),
+      headers: headers('v2-identities-denied'),
       body: JSON.stringify(input),
     });
     expect(denied.status).toBe(400);
@@ -241,18 +308,18 @@ describe('Private conversation API', () => {
 
     await allowAddress(V2_FROM, 'REPLY_TO');
     await allowAddress(V2_REPLY_TO, 'FROM');
-    const wrongRoles = await fetch(baseUrlV2, {
+    const wrongRoles = await fetch(baseUrl, {
       method: 'POST',
-      headers: v2Headers('v2-identities-wrong-roles'),
+      headers: headers('v2-identities-wrong-roles'),
       body: JSON.stringify(input),
     });
     expect(wrongRoles.status).toBe(400);
 
     await allowAddress(V2_FROM, 'FROM');
     await allowAddress(V2_REPLY_TO, 'REPLY_TO');
-    const response = await fetch(baseUrlV2, {
+    const response = await fetch(baseUrl, {
       method: 'POST',
-      headers: v2Headers('v2-identities-allowed'),
+      headers: headers('v2-identities-allowed'),
       body: JSON.stringify(input),
     });
     const body = await response.json();
@@ -280,16 +347,25 @@ describe('Private conversation API', () => {
     ]);
   });
 
-  it('promotes a V1 conversation on V2 reply and blocks later V1 writes', async () => {
+  // The V1 HTTP surface is retired, but conversations created by it still exist
+  // and are promoted to V2 on the first authorized V2 write. This seeds that
+  // legacy shape directly, since it can no longer be produced over HTTP.
+  it('promotes a legacy V1 conversation on a V2 reply', async () => {
     const created = await createConversation('v1-before-promotion');
+    await database.query(
+      `UPDATE email_conversations
+         SET api_version = 'V1', reply_to_requires_allowlist = false
+       WHERE id = $1`,
+      [created.body.conversationId],
+    );
     await allowAddress(V2_FROM, 'FROM');
     await allowAddress(TEST_CONFIG.replyToBaseAddress, 'REPLY_TO');
 
     const promotedResponse = await fetch(
-      `${baseUrlV2}/${created.body.conversationId.toUpperCase()}/messages`,
+      `${baseUrl}/${created.body.conversationId.toUpperCase()}/messages`,
       {
         method: 'POST',
-        headers: v2Headers('promote-v1-conversation'),
+        headers: headers('promote-v1-conversation'),
         body: JSON.stringify({
           text: 'Continue through V2.',
           from: { address: V2_FROM, name: 'Booking Team' },
@@ -319,28 +395,15 @@ describe('Private conversation API', () => {
       reply_to_requires_allowlist: true,
     });
 
-    const legacyReply = await fetch(
-      `${baseUrl}/${created.body.conversationId}/messages`,
-      {
-        method: 'POST',
-        headers: headers('legacy-after-promotion'),
-        body: JSON.stringify({ text: 'Legacy reply.' }),
-      },
-    );
-    expect(legacyReply.status).toBe(409);
-    await expect(legacyReply.json()).resolves.toEqual({
-      error: 'Conversation requires API v2',
-    });
-
     await database.query(
       'DELETE FROM email_address_allowlist_entries WHERE address = $1 AND role = $2',
       [TEST_CONFIG.replyToBaseAddress, 'REPLY_TO'],
     );
     const revokedReply = await fetch(
-      `${baseUrlV2}/${created.body.conversationId}/messages`,
+      `${baseUrl}/${created.body.conversationId}/messages`,
       {
         method: 'POST',
-        headers: v2Headers('reply-after-revocation'),
+        headers: headers('reply-after-revocation'),
         body: JSON.stringify({
           text: 'Should not send.',
           from: { address: V2_FROM },
@@ -355,15 +418,15 @@ describe('Private conversation API', () => {
   it('keeps an authorized V2 outbox intent frozen after revocation', async () => {
     await allowAddress(V2_FROM, 'FROM');
     await allowAddress(V2_REPLY_TO, 'REPLY_TO');
-    const queued = await fetch(`${baseUrlV2}/outbox`, {
+    const queued = await fetch(`${baseUrl}/outbox`, {
       method: 'POST',
-      headers: v2Headers('v2-frozen-outbox'),
+      headers: headers('v2-frozen-outbox'),
       body: JSON.stringify(v2CreateBody('v2-frozen-outbox')),
     });
     expect(queued.status).toBe(202);
 
     await database.query('TRUNCATE TABLE email_address_allowlist_entries');
-    const drained = await fetch(`${baseUrlV2}/outbox/drain`, {
+    const drained = await fetch(`${baseUrl}/outbox/drain`, {
       method: 'POST',
       headers: drainHeaders(),
       body: JSON.stringify({ limit: 100 }),
@@ -387,34 +450,31 @@ describe('Private conversation API', () => {
     await allowAddress(V2_FROM, 'FROM');
     await allowAddress(V2_REPLY_TO, 'REPLY_TO');
     await allowAddress('support@mail-dev.fionasicecream.com', 'REPLY_TO');
-    const createdResponse = await fetch(baseUrlV2, {
+    const createdResponse = await fetch(baseUrl, {
       method: 'POST',
-      headers: v2Headers('v2-fixed-base-opening'),
+      headers: headers('v2-fixed-base-opening'),
       body: JSON.stringify(v2CreateBody('v2-fixed-base')),
     });
     const created = await createdResponse.json();
 
-    const reply = await fetch(
-      `${baseUrlV2}/${created.conversationId}/messages`,
-      {
-        method: 'POST',
-        headers: v2Headers('v2-different-base'),
-        body: JSON.stringify({
-          text: 'Wrong base.',
-          from: { address: V2_FROM },
-          replyTo: { address: 'support@mail-dev.fionasicecream.com' },
-        }),
-      },
-    );
+    const reply = await fetch(`${baseUrl}/${created.conversationId}/messages`, {
+      method: 'POST',
+      headers: headers('v2-different-base'),
+      body: JSON.stringify({
+        text: 'Wrong base.',
+        from: { address: V2_FROM },
+        replyTo: { address: 'support@mail-dev.fionasicecream.com' },
+      }),
+    });
     expect(reply.status).toBe(400);
   });
 
   it('routes ancestry-free inbound mail through a persisted V2 Reply-To base', async () => {
     await allowAddress(V2_FROM, 'FROM');
     await allowAddress(V2_REPLY_TO, 'REPLY_TO');
-    const createdResponse = await fetch(baseUrlV2, {
+    const createdResponse = await fetch(baseUrl, {
       method: 'POST',
-      headers: v2Headers('v2-custom-routing-opening'),
+      headers: headers('v2-custom-routing-opening'),
       body: JSON.stringify(v2CreateBody('v2-custom-routing')),
     });
     const created = await createdResponse.json();
@@ -524,9 +584,9 @@ describe('Private conversation API', () => {
        VALUES ('V2 inbound question', 'V2 inbound question', 'person@example.com', now(), now())
        RETURNING id`,
     );
-    const assigned = await fetch(`${baseUrlV2}/${rows[0].id}`, {
+    const assigned = await fetch(`${baseUrl}/${rows[0].id}`, {
       method: 'PATCH',
-      headers: v2Headers(),
+      headers: headers(),
       body: JSON.stringify({
         topic: {
           type: 'booking',
@@ -537,25 +597,25 @@ describe('Private conversation API', () => {
     });
     expect(assigned.status).toBe(200);
 
-    const byTopic = await fetch(`${baseUrlV2}/topics/booking/v2-assignment`, {
-      headers: v2Headers(),
+    const byTopic = await fetch(`${baseUrl}/topics/booking/v2-assignment`, {
+      headers: headers(),
     });
     expect(byTopic.status).toBe(200);
 
-    const legacyMutation = await fetch(`${baseUrl}/${rows[0].id}`, {
+    const reassignment = await fetch(`${baseUrl}/${rows[0].id}`, {
       method: 'PATCH',
       headers: headers(),
       body: JSON.stringify({
         topic: {
           type: 'booking',
-          externalId: 'legacy-assignment',
-          title: 'Legacy assignment',
+          externalId: 'second-assignment',
+          title: 'Second assignment',
         },
       }),
     });
-    expect(legacyMutation.status).toBe(409);
-    await expect(legacyMutation.json()).resolves.toEqual({
-      error: 'Conversation requires API v2',
+    expect(reassignment.status).toBe(409);
+    await expect(reassignment.json()).resolves.toEqual({
+      error: 'Conversation is already assigned to a topic',
     });
 
     const alreadyV2 = await database.query<{ id: string }>(
@@ -565,10 +625,10 @@ describe('Private conversation API', () => {
        RETURNING id`,
     );
     const assignAfterV2Reply = await fetch(
-      `${baseUrlV2}/${alreadyV2.rows[0].id}`,
+      `${baseUrl}/${alreadyV2.rows[0].id}`,
       {
         method: 'PATCH',
-        headers: v2Headers(),
+        headers: headers(),
         body: JSON.stringify({
           topic: {
             type: 'booking',
@@ -669,7 +729,7 @@ describe('Private conversation API', () => {
       body: JSON.stringify({
         topic: { type: 'booking', externalId: '4821', title: 'Booking 4821' },
         participant: { email: 'corrected@example.com', name: 'Person' },
-        message: { text: 'Opening message' },
+        message: { text: 'Opening message', ...defaultIdentities() },
       }),
     });
     const reopened = await reopenedResponse.json();
@@ -678,7 +738,9 @@ describe('Private conversation API', () => {
     expect(reopened.message.state).toBe('accepted');
     expect(reopened.message.replyTo).toBe(failed.body.message.replyTo);
     expect(resendServer.sends).toHaveLength(1);
-    expect(resendServer.sends[0].input.to).toEqual(['corrected@example.com']);
+    expect(resendServer.sends[0].input.to).toEqual([
+      'Person <corrected@example.com>',
+    ]);
 
     const conflict = await createConversation('reopen-conflict');
     expect(conflict.response.status).toBe(409);
@@ -772,7 +834,7 @@ describe('Private conversation API', () => {
 
   it('drains queued messages through one ordered Resend batch', async () => {
     const first = await queueConversation('batch-first', 'batch-1', {
-      replyToName: 'Batch One',
+      replyTo: { address: TEST_CONFIG.replyToBaseAddress, name: 'Batch One' },
     });
     const second = await queueConversation('batch-second', 'batch-2');
 
@@ -792,8 +854,8 @@ describe('Private conversation API', () => {
     ).toEqual([first.body.message.id, second.body.message.id]);
     expect(resendServer.batches).toHaveLength(1);
     expect(resendServer.batches[0].inputs.map(({ to }) => to[0])).toEqual([
-      'person@example.com',
-      'person@example.com',
+      'Person <person@example.com>',
+      'Person <person@example.com>',
     ]);
     expect(
       resendServer.batches[0].inputs.map(({ reply_to }) => reply_to),
@@ -828,7 +890,7 @@ describe('Private conversation API', () => {
       {
         method: 'POST',
         headers: headers('queued-reply'),
-        body: JSON.stringify({ text: 'Queued reply' }),
+        body: JSON.stringify(replyBody('Queued reply')),
       },
     );
     const queued = await response.json();
@@ -1090,7 +1152,7 @@ describe('Private conversation API', () => {
       {
         method: 'POST',
         headers: headers('state-v1-reply-send'),
-        body: JSON.stringify({ text: 'Replying now.' }),
+        body: JSON.stringify(replyBody('Replying now.')),
       },
     );
     expect(reply.status).toBe(201);
@@ -1111,7 +1173,7 @@ describe('Private conversation API', () => {
       {
         method: 'POST',
         headers: headers('state-v1-enqueue-send'),
-        body: JSON.stringify({ text: 'Queued reply.' }),
+        body: JSON.stringify(replyBody('Queued reply.')),
       },
     );
     expect(reply.status).toBe(202);
@@ -1124,9 +1186,9 @@ describe('Private conversation API', () => {
     await allowAddress(V2_FROM, 'FROM');
     await allowAddress(V2_REPLY_TO, 'REPLY_TO');
     for (const [index, path] of ['messages', 'messages/outbox'].entries()) {
-      const createdResponse = await fetch(baseUrlV2, {
+      const createdResponse = await fetch(baseUrl, {
         method: 'POST',
-        headers: v2Headers(`state-v2-open-${index}`),
+        headers: headers(`state-v2-open-${index}`),
         body: JSON.stringify(v2CreateBody(`state-v2-${index}`)),
       });
       const created = await createdResponse.json();
@@ -1136,10 +1198,10 @@ describe('Private conversation API', () => {
       );
 
       const reply = await fetch(
-        `${baseUrlV2}/${created.conversationId}/${path}`,
+        `${baseUrl}/${created.conversationId}/${path}`,
         {
           method: 'POST',
-          headers: v2Headers(`state-v2-reply-${index}`),
+          headers: headers(`state-v2-reply-${index}`),
           body: JSON.stringify({
             text: 'Replying now.',
             from: { address: V2_FROM },
@@ -1303,12 +1365,12 @@ describe('Private conversation API', () => {
   });
 
   it('rejects an unknown summary state and cursor', async () => {
-    const unknownState = await fetch(`${baseUrlV2}/summary?state=nonsense`, {
-      headers: v2Headers(),
+    const unknownState = await fetch(`${baseUrl}/summary?state=nonsense`, {
+      headers: headers(),
     });
     expect(unknownState.status).toBe(400);
-    const badCursor = await fetch(`${baseUrlV2}/summary?before=not-a-cursor`, {
-      headers: v2Headers(),
+    const badCursor = await fetch(`${baseUrl}/summary?before=not-a-cursor`, {
+      headers: headers(),
     });
     expect(badCursor.status).toBe(400);
   });
@@ -1335,16 +1397,16 @@ describe('Private conversation API', () => {
     expect(invalid.status).toBe(400);
 
     const empty = await fetch(
-      `${baseUrlV2}/${created.body.conversationId}/state`,
-      { method: 'POST', headers: v2Headers(), body: JSON.stringify({}) },
+      `${baseUrl}/${created.body.conversationId}/state`,
+      { method: 'POST', headers: headers(), body: JSON.stringify({}) },
     );
     expect(empty.status).toBe(400);
 
     const missing = await fetch(
-      `${baseUrlV2}/01a00428-22f0-7e98-8881-097423751599/state`,
+      `${baseUrl}/01a00428-22f0-7e98-8881-097423751599/state`,
       {
         method: 'POST',
-        headers: v2Headers(),
+        headers: headers(),
         body: JSON.stringify({ state: 'concluded' }),
       },
     );
@@ -1353,12 +1415,16 @@ describe('Private conversation API', () => {
 
   it('requires the V2 credential on the state routes', async () => {
     const created = await createConversation('state-auth');
+    const wrongCredential = {
+      authorization: `Bearer ${TEST_CONFIG.outboxDrainApiKey}`,
+      'content-type': 'application/json',
+    };
     for (const request of [
-      fetch(`${baseUrlV2}/summary`),
-      fetch(`${baseUrlV2}/summary`, { headers: headers() }),
-      fetch(`${baseUrlV2}/${created.body.conversationId}/state`, {
+      fetch(`${baseUrl}/summary`),
+      fetch(`${baseUrl}/summary`, { headers: wrongCredential }),
+      fetch(`${baseUrl}/${created.body.conversationId}/state`, {
         method: 'POST',
-        headers: headers(),
+        headers: wrongCredential,
         body: JSON.stringify({ state: 'concluded' }),
       }),
     ]) {
@@ -1407,27 +1473,26 @@ describe('Private conversation API', () => {
     return postWebhook(event);
   }
 
-  async function readState(conversationId: string, v2 = false) {
-    const response = await fetch(
-      `${v2 ? baseUrlV2 : baseUrl}/${conversationId}`,
-      { headers: v2 ? v2Headers() : headers() },
-    );
+  async function readState(conversationId: string) {
+    const response = await fetch(`${baseUrl}/${conversationId}`, {
+      headers: headers(),
+    });
     expect(response.status).toBe(200);
     return response.json();
   }
 
   async function readSummary(query = '') {
-    const response = await fetch(`${baseUrlV2}/summary${query}`, {
-      headers: v2Headers(),
+    const response = await fetch(`${baseUrl}/summary${query}`, {
+      headers: headers(),
     });
     expect(response.status).toBe(200);
     return response.json();
   }
 
   async function setState(conversationId: string, state: string) {
-    const response = await fetch(`${baseUrlV2}/${conversationId}/state`, {
+    const response = await fetch(`${baseUrl}/${conversationId}/state`, {
       method: 'POST',
-      headers: v2Headers(),
+      headers: headers(),
       body: JSON.stringify({ state }),
     });
     return { status: response.status, body: await response.json() };
@@ -1437,6 +1502,7 @@ describe('Private conversation API', () => {
     idempotencyKey: string,
     body = createBody(),
   ) {
+    await allowDefaultIdentities();
     const response = await fetch(baseUrl, {
       method: 'POST',
       headers: headers(idempotencyKey),
@@ -1448,14 +1514,20 @@ describe('Private conversation API', () => {
   async function queueConversation(
     idempotencyKey: string,
     externalId: string,
-    messageOverrides: Record<string, string> = {},
+    messageOverrides: Record<string, unknown> = {},
   ) {
+    await allowDefaultIdentities();
     const response = await fetch(`${baseUrl}/outbox`, {
       method: 'POST',
       headers: headers(idempotencyKey),
       body: JSON.stringify(createBodyForTopic(externalId, messageOverrides)),
     });
     return { response, body: await response.json() };
+  }
+
+  async function allowDefaultIdentities() {
+    await allowAddress(V2_FROM, 'FROM');
+    await allowAddress(TEST_CONFIG.replyToBaseAddress, 'REPLY_TO');
   }
 
   async function drainOutbox(limit: number) {
@@ -1482,7 +1554,7 @@ const V2_REPLY_TO = 'booking-replies@mail-dev.fionasicecream.com';
 
 function headers(idempotencyKey?: string): Record<string, string> {
   return {
-    authorization: `Bearer ${TEST_CONFIG.conversationApiKey}`,
+    authorization: `Bearer ${TEST_CONFIG.emailV2ApiKey}`,
     'content-type': 'application/json',
     ...(idempotencyKey ? { 'idempotency-key': idempotencyKey } : {}),
   };
@@ -1492,14 +1564,6 @@ function drainHeaders(): Record<string, string> {
   return {
     authorization: `Bearer ${TEST_CONFIG.outboxDrainApiKey}`,
     'content-type': 'application/json',
-  };
-}
-
-function v2Headers(idempotencyKey?: string): Record<string, string> {
-  return {
-    authorization: `Bearer ${TEST_CONFIG.emailV2ApiKey}`,
-    'content-type': 'application/json',
-    ...(idempotencyKey ? { 'idempotency-key': idempotencyKey } : {}),
   };
 }
 
@@ -1516,18 +1580,22 @@ function expectRoutingAddress(value: string) {
 
 function createBody(
   title = 'Booking 4821',
-  messageOverrides: Record<string, string> = {},
+  messageOverrides: Record<string, unknown> = {},
 ) {
   return {
     topic: { type: 'booking', externalId: '4821', title },
     participant: { email: 'person@example.com', name: 'Person' },
-    message: { text: 'Opening message', ...messageOverrides },
+    message: {
+      text: 'Opening message',
+      ...defaultIdentities(),
+      ...messageOverrides,
+    },
   };
 }
 
 function createBodyForTopic(
   externalId: string,
-  messageOverrides: Record<string, string> = {},
+  messageOverrides: Record<string, unknown> = {},
 ) {
   return {
     topic: {
@@ -1536,8 +1604,27 @@ function createBodyForTopic(
       title: `Booking ${externalId}`,
     },
     participant: { email: 'person@example.com', name: 'Person' },
-    message: { text: 'Opening message', ...messageOverrides },
+    message: {
+      text: 'Opening message',
+      ...defaultIdentities(),
+      ...messageOverrides,
+    },
   };
+}
+
+// The conversation suite exercises version-agnostic machinery through V2.
+// These identities are authorized by `allowDefaultIdentities` in the helpers
+// below, and the Reply-To base matches RESEND_REPLY_TO so that routing-token
+// assertions stay independent of the caller-supplied identity.
+function defaultIdentities() {
+  return {
+    from: { address: V2_FROM },
+    replyTo: { address: TEST_CONFIG.replyToBaseAddress },
+  };
+}
+
+function replyBody(text: string, overrides: Record<string, unknown> = {}) {
+  return { text, ...defaultIdentities(), ...overrides };
 }
 
 function v2CreateBody(externalId: string) {

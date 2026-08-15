@@ -2,8 +2,8 @@
   "openapi": "3.1.1",
   "info": {
     "title": "resend-service API",
-    "version": "0.4.0",
-    "description": "Receives signed Resend webhooks and provides bearer-authenticated topic-centered conversations plus synchronous and queued direct email. Conversation API v2 is current; conversation API v1 remains available as a deprecated, frozen compatibility surface with no announced sunset. The service persists outbound intent before contacting Resend, preserves RFC reply relationships for conversations, and stores untrusted email content without retrieving attachments.",
+    "version": "0.5.0",
+    "description": "Receives signed Resend webhooks and provides bearer-authenticated topic-centered conversations plus synchronous and queued direct email. Conversation API v2 is the only conversation contract; conversation API v1 was retired in 0.5.0 and its paths are no longer routed. The service persists outbound intent before contacting Resend, preserves RFC reply relationships for conversations, and stores untrusted email content without retrieving attachments.",
     "license": {
       "name": "MIT",
       "identifier": "MIT"
@@ -17,7 +17,7 @@
   ],
   "security": [
     {
-      "bearerAuth": []
+      "emailV2Auth": []
     }
   ],
   "tags": [
@@ -305,963 +305,29 @@
         }
       }
     },
-    "/api/conversations/v1": {
-      "post": {
-        "operationId": "createConversation",
-        "deprecated": true,
-        "summary": "Start a topic conversation",
-        "description": "Deprecated frozen V1 operation with no announced sunset. Creates the single conversation for an external topic and sends its opening email using server-configured RESEND_FROM and RESEND_REPLY_TO; callers cannot select identities. It cannot reopen a topic conversation already promoted to V2. The Idempotency-Key is retained indefinitely by this service, while provider requests use an internal provider-scoped idempotency value. Repeating the same key and normalized request returns the existing message; reusing the key with a different normalized request returns 409. Subject values are normalized by stripping leading Re:/Fw:/Fwd: prefixes case-insensitively.",
-        "tags": ["Conversations"],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/IdempotencyKey"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateConversationRequest"
-              },
-              "example": {
-                "topic": {
-                  "type": "booking",
-                  "externalId": "4821",
-                  "title": "Booking 4821"
-                },
-                "participant": {
-                  "email": "person@example.com",
-                  "name": "Person"
-                },
-                "message": {
-                  "text": "Your booking request was received.",
-                  "replyToName": "Brayan"
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "An earlier completed request with this idempotency key was returned.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SendResult"
-                }
-              }
-            }
-          },
-          "201": {
-            "description": "Conversation created (or a failed topic conversation re-opened with a new idempotency key) and the opening email accepted by Resend.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SendResult"
-                }
-              }
-            }
-          },
-          "202": {
-            "description": "An earlier request with this idempotency key is still pending.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SendResult"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "409": {
-            "description": "The idempotency key was used for a different request, or the topic already owns a conversation with at least one message that is not failed. A topic conversation whose messages have all failed is re-opened instead: a new idempotency key creates and sends a fresh opening message.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "413": {
-            "$ref": "#/components/responses/PayloadTooLarge"
-          },
-          "415": {
-            "$ref": "#/components/responses/UnsupportedContentEncoding"
-          },
-          "500": {
-            "$ref": "#/components/responses/ServerError"
-          },
-          "502": {
-            "description": "Resend did not accept the email or the send result is indeterminate. The response includes the persisted conversation and message identifiers.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SendFailure"
-                }
-              }
-            }
-          }
-        }
-      },
-      "get": {
-        "operationId": "listUnassignedConversations",
-        "deprecated": true,
-        "summary": "List unassigned inbound conversations",
-        "description": "Deprecated frozen V1 read operation with no announced sunset. Returns inbound conversations whose RFC headers did not match a topic-backed conversation. Reads are not version-filtered.",
-        "tags": ["Conversations"],
-        "parameters": [
-          {
-            "name": "assignment",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "const": "unassigned"
-            }
-          },
-          {
-            "$ref": "#/components/parameters/Limit"
-          },
-          {
-            "name": "before",
-            "in": "query",
-            "description": "Opaque cursor returned by the previous unassigned-conversation page.",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Unassigned conversation summaries.",
-            "content": {
-              "application/json": {
-                "example": {
-                  "conversations": [
-                    {
-                      "id": "019808b9-37c4-7ed7-93c5-8960f0b690aa",
-                      "title": "Inquiry from person@example.com",
-                      "participant": {
-                        "address": "person@example.com",
-                        "name": null
-                      },
-                      "lastMessageAt": "2026-07-18T12:00:00.000Z"
-                    }
-                  ],
-                  "page": {
-                    "hasMore": false,
-                    "before": null
-                  }
-                },
-                "schema": {
-                  "type": "object",
-                  "required": ["conversations", "page"],
-                  "properties": {
-                    "conversations": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/ConversationSummary"
-                      }
-                    },
-                    "page": {
-                      "type": "object",
-                      "required": ["hasMore", "before"],
-                      "properties": {
-                        "hasMore": {
-                          "type": "boolean"
-                        },
-                        "before": {
-                          "type": ["string", "null"],
-                          "description": "Opaque base64url cursor for the next unassigned-conversation page."
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "500": {
-            "$ref": "#/components/responses/ServerError"
-          }
-        }
-      }
-    },
-    "/api/conversations/v1/outbox": {
-      "post": {
-        "operationId": "enqueueConversation",
-        "deprecated": true,
-        "summary": "Queue a topic conversation",
-        "description": "Deprecated frozen V1 operation with no announced sunset. Atomically creates the conversation, pending opening message, and outbox entry using server-configured identities without sending to Resend. A topic whose messages have all failed may be reopened only if it has not been promoted to V2.",
-        "tags": ["Outbox"],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/IdempotencyKey"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateConversationRequest"
-              },
-              "example": {
-                "topic": {
-                  "type": "booking",
-                  "externalId": "4821",
-                  "title": "Booking 4821"
-                },
-                "participant": {
-                  "email": "person@example.com",
-                  "name": "Person"
-                },
-                "message": {
-                  "text": "Opening message",
-                  "replyToName": "Support Team"
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "An earlier completed outbox request with this idempotency key was returned.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SendResult"
-                }
-              }
-            }
-          },
-          "202": {
-            "description": "The persisted opening message is pending outbox delivery.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SendResult"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "413": {
-            "$ref": "#/components/responses/PayloadTooLarge"
-          },
-          "415": {
-            "$ref": "#/components/responses/UnsupportedContentEncoding"
-          },
-          "500": {
-            "$ref": "#/components/responses/ServerError"
-          },
-          "502": {
-            "description": "An earlier outbox request completed as failed or indeterminate.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SendFailure"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/conversations/v1/outbox/drain": {
-      "post": {
-        "operationId": "drainConversationOutbox",
-        "deprecated": true,
-        "summary": "Deliver one outbox batch",
-        "description": "Deprecated V1 route mirror with no announced sunset for the shared drain operation. Claims or reclaims one persistent batch containing direct, V1 conversation, and/or V2 conversation intent and makes at most one bounded Resend batch request. It remains protected by the dedicated drain credential. Transient failures retain exact ordered membership for a later idempotent retry.",
-        "tags": ["Outbox"],
-        "security": [
-          {
-            "outboxDrainAuth": []
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DrainOutboxRequest"
-              },
-              "example": {
-                "limit": 100
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "The bounded drain invocation completed, including persisted retry scheduling when applicable.",
-            "content": {
-              "application/json": {
-                "examples": {
-                  "acceptedBatch": {
-                    "value": {
-                      "batchId": "019808b9-37c4-7ed7-93c5-8960f0b690ff",
-                      "claimed": 2,
-                      "accepted": 2,
-                      "failed": 0,
-                      "retryScheduled": 0,
-                      "indeterminate": 0,
-                      "results": [
-                        {
-                          "messageId": "019808b9-37c4-7ed7-93c5-8960f0b690ab",
-                          "state": "accepted",
-                          "resendEmailId": "batch-1"
-                        },
-                        {
-                          "messageId": "019808b9-37c4-7ed7-93c5-8960f0b690ac",
-                          "state": "accepted",
-                          "resendEmailId": "batch-2"
-                        }
-                      ]
-                    }
-                  },
-                  "retryScheduledBatch": {
-                    "value": {
-                      "batchId": "019808b9-37c4-7ed7-93c5-8960f0b690ff",
-                      "claimed": 2,
-                      "accepted": 0,
-                      "failed": 0,
-                      "retryScheduled": 2,
-                      "indeterminate": 0,
-                      "results": [
-                        {
-                          "messageId": "019808b9-37c4-7ed7-93c5-8960f0b690ab",
-                          "state": "pending",
-                          "resendEmailId": null
-                        },
-                        {
-                          "messageId": "019808b9-37c4-7ed7-93c5-8960f0b690ac",
-                          "state": "pending",
-                          "resendEmailId": null
-                        }
-                      ]
-                    }
-                  }
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/DrainOutboxResult"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "413": {
-            "$ref": "#/components/responses/PayloadTooLarge"
-          },
-          "415": {
-            "$ref": "#/components/responses/UnsupportedContentEncoding"
-          },
-          "500": {
-            "$ref": "#/components/responses/ServerError"
-          }
-        }
-      }
-    },
-    "/api/conversations/v1/{conversationId}": {
-      "parameters": [
-        {
-          "$ref": "#/components/parameters/ConversationId"
-        }
-      ],
-      "get": {
-        "operationId": "getConversation",
-        "deprecated": true,
-        "summary": "Get a conversation by service ID",
-        "description": "Deprecated frozen V1 read operation with no announced sunset. Reads are not version-filtered and do not demote a V2 conversation.",
-        "tags": ["Conversations"],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/Limit"
-          },
-          {
-            "$ref": "#/components/parameters/Before"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Conversation and a chronological page of messages.",
-            "content": {
-              "application/json": {
-                "example": {
-                  "id": "019808b9-37c4-7ed7-93c5-8960f0b690aa",
-                  "topic": {
-                    "type": "booking",
-                    "externalId": "4821",
-                    "title": "Booking 4821"
-                  },
-                  "title": "Booking 4821",
-                  "subject": "Booking 4821",
-                  "participant": {
-                    "address": "person@example.com",
-                    "name": "Person"
-                  },
-                  "replyToAddress": "mailbox+c_8f2a1b9d4f8c4fd2a7319df35a6c041e@replies.example.com",
-                  "state": "awaiting_participant",
-                  "stateChangedAt": "2026-07-18T12:05:00.000Z",
-                  "awaitingReply": false,
-                  "lastMessageAt": "2026-07-18T12:05:00.000Z",
-                  "createdAt": "2026-07-18T12:00:00.000Z",
-                  "updatedAt": "2026-07-18T12:05:00.000Z",
-                  "messages": [
-                    {
-                      "id": "019808b9-37c4-7ed7-93c5-8960f0b690ab",
-                      "parentMessageId": null,
-                      "direction": "outbound",
-                      "state": "accepted",
-                      "stateDetail": null,
-                      "deliveryState": "unknown",
-                      "deliveryStateDetail": null,
-                      "deliveredAt": null,
-                      "resendEmailId": "sent_123",
-                      "internetMessageId": "<sent-1@resend.test>",
-                      "from": {
-                        "address": "mailbox@example.com",
-                        "name": "Mailbox"
-                      },
-                      "to": "person@example.com",
-                      "replyTo": "mailbox+c_8f2a1b9d4f8c4fd2a7319df35a6c041e@replies.example.com",
-                      "replyToName": null,
-                      "subject": "Booking 4821",
-                      "text": "Your booking request was received.",
-                      "html": null,
-                      "createdAt": "2026-07-18T12:00:00.000Z"
-                    },
-                    {
-                      "id": "019808b9-37c4-7ed7-93c5-8960f0b690ac",
-                      "parentMessageId": "019808b9-37c4-7ed7-93c5-8960f0b690ab",
-                      "direction": "outbound",
-                      "state": "accepted",
-                      "stateDetail": null,
-                      "deliveryState": "delivered",
-                      "deliveryStateDetail": null,
-                      "deliveredAt": "2026-07-18T12:05:30.000Z",
-                      "resendEmailId": "sent_124",
-                      "internetMessageId": "<sent-2@resend.test>",
-                      "from": {
-                        "address": "mailbox@example.com",
-                        "name": "Mailbox"
-                      },
-                      "to": "person@example.com",
-                      "replyTo": "mailbox+c_8f2a1b9d4f8c4fd2a7319df35a6c041e@replies.example.com",
-                      "replyToName": null,
-                      "subject": "Re: Booking 4821",
-                      "text": "Here is the requested update.",
-                      "html": null,
-                      "createdAt": "2026-07-18T12:05:00.000Z"
-                    }
-                  ],
-                  "page": {
-                    "hasMoreBefore": false,
-                    "before": null
-                  }
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/Conversation"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "500": {
-            "$ref": "#/components/responses/ServerError"
-          }
-        }
-      },
-      "patch": {
-        "operationId": "assignConversationTopic",
-        "deprecated": true,
-        "summary": "Assign an unassigned conversation",
-        "description": "Deprecated frozen V1 mutation with no announced sunset. Assigns a topic exactly once only while the unassigned conversation is unversioned or V1. A conversation already marked V2 is rejected with 409 Conversation requires API v2.",
-        "tags": ["Conversations"],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": ["topic"],
-                "properties": {
-                  "topic": {
-                    "$ref": "#/components/schemas/Topic"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Assigned conversation.",
-            "content": {
-              "application/json": {
-                "example": {
-                  "id": "019808b9-37c4-7ed7-93c5-8960f0b690aa",
-                  "topic": {
-                    "type": "booking",
-                    "externalId": "9911",
-                    "title": "Booking 9911"
-                  },
-                  "title": "Booking 9911",
-                  "subject": "Inquiry from person@example.com",
-                  "participant": {
-                    "address": "person@example.com",
-                    "name": null
-                  },
-                  "replyToAddress": "mailbox+c_8f2a1b9d4f8c4fd2a7319df35a6c041e@replies.example.com",
-                  "state": "awaiting_participant",
-                  "stateChangedAt": "2026-07-18T12:00:00.000Z",
-                  "awaitingReply": false,
-                  "lastMessageAt": "2026-07-18T12:00:00.000Z",
-                  "createdAt": "2026-07-18T12:00:00.000Z",
-                  "updatedAt": "2026-07-18T12:10:00.000Z",
-                  "messages": [],
-                  "page": {
-                    "hasMoreBefore": false,
-                    "before": null
-                  }
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/Conversation"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "413": {
-            "$ref": "#/components/responses/PayloadTooLarge"
-          },
-          "415": {
-            "$ref": "#/components/responses/UnsupportedContentEncoding"
-          },
-          "500": {
-            "$ref": "#/components/responses/ServerError"
-          }
-        }
-      }
-    },
-    "/api/conversations/v1/{conversationId}/messages": {
-      "post": {
-        "operationId": "createConversationMessage",
-        "deprecated": true,
-        "summary": "Continue a conversation",
-        "description": "Deprecated frozen V1 operation with no announced sunset. Sends with server-configured RESEND_FROM and RESEND_REPLY_TO. A conversation promoted to V2 is rejected with 409 Conversation requires API v2. Otherwise it replies to an explicit parent or the latest accepted or received message; In-Reply-To is the parent RFC Message-ID and References is the parent's ancestry followed by that identifier.",
-        "tags": ["Messages"],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/ConversationId"
-          },
-          {
-            "$ref": "#/components/parameters/IdempotencyKey"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateMessageRequest"
-              },
-              "example": {
-                "text": "Here is the requested update.",
-                "replyToName": "Brayan"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "An earlier completed request with this idempotency key was returned.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SendResult"
-                }
-              }
-            }
-          },
-          "201": {
-            "description": "Reply accepted by Resend.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SendResult"
-                }
-              }
-            }
-          },
-          "202": {
-            "description": "An earlier request with this idempotency key is still pending.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SendResult"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "413": {
-            "$ref": "#/components/responses/PayloadTooLarge"
-          },
-          "415": {
-            "$ref": "#/components/responses/UnsupportedContentEncoding"
-          },
-          "500": {
-            "$ref": "#/components/responses/ServerError"
-          },
-          "502": {
-            "description": "Resend did not accept the email or the send result is indeterminate.",
-            "content": {
-              "application/json": {
-                "examples": {
-                  "failedSend": {
-                    "value": {
-                      "error": "Failed to send email",
-                      "conversationId": "019808b9-37c4-7ed7-93c5-8960f0b690aa",
-                      "message": {
-                        "id": "019808b9-37c4-7ed7-93c5-8960f0b690ab",
-                        "parentMessageId": null,
-                        "direction": "outbound",
-                        "state": "failed",
-                        "stateDetail": "provider rejected send",
-                        "deliveryState": "unknown",
-                        "deliveryStateDetail": null,
-                        "deliveredAt": null,
-                        "resendEmailId": null,
-                        "internetMessageId": null,
-                        "from": {
-                          "address": "mailbox@example.com",
-                          "name": "Mailbox"
-                        },
-                        "to": "person@example.com",
-                        "replyTo": "mailbox+c_8f2a1b9d4f8c4fd2a7319df35a6c041e@replies.example.com",
-                        "replyToName": null,
-                        "subject": "Re: Booking 4821",
-                        "text": "Here is the requested update.",
-                        "html": null,
-                        "createdAt": "2026-07-18T12:05:00.000Z"
-                      }
-                    }
-                  },
-                  "replayedFailedSend": {
-                    "value": {
-                      "error": "Email was not confirmed as sent",
-                      "conversationId": "019808b9-37c4-7ed7-93c5-8960f0b690aa",
-                      "message": {
-                        "id": "019808b9-37c4-7ed7-93c5-8960f0b690ab",
-                        "parentMessageId": null,
-                        "direction": "outbound",
-                        "state": "failed",
-                        "stateDetail": "provider rejected send",
-                        "deliveryState": "unknown",
-                        "deliveryStateDetail": null,
-                        "deliveredAt": null,
-                        "resendEmailId": null,
-                        "internetMessageId": null,
-                        "from": {
-                          "address": "mailbox@example.com",
-                          "name": "Mailbox"
-                        },
-                        "to": "person@example.com",
-                        "replyTo": "mailbox+c_8f2a1b9d4f8c4fd2a7319df35a6c041e@replies.example.com",
-                        "replyToName": null,
-                        "subject": "Re: Booking 4821",
-                        "text": "Here is the requested update.",
-                        "html": null,
-                        "createdAt": "2026-07-18T12:05:00.000Z"
-                      }
-                    }
-                  }
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/SendFailure"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "The selected parent RFC Message-ID could not be retrieved.",
-            "content": {
-              "application/json": {
-                "example": {
-                  "error": "Reply parent threading metadata is unavailable"
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/conversations/v1/{conversationId}/messages/outbox": {
-      "post": {
-        "operationId": "enqueueConversationMessage",
-        "deprecated": true,
-        "summary": "Queue a conversation reply",
-        "description": "Deprecated frozen V1 operation with no announced sunset. Resolves and freezes the reply parent and RFC ancestry, then atomically creates a pending message and outbox entry using server-configured identities. A conversation promoted to V2 is rejected with 409 Conversation requires API v2.",
-        "tags": ["Outbox"],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/ConversationId"
-          },
-          {
-            "$ref": "#/components/parameters/IdempotencyKey"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateMessageRequest"
-              },
-              "example": {
-                "text": "Queued reply",
-                "replyToMessageId": "019808b9-37c4-7ed7-93c5-8960f0b690ab",
-                "replyToName": "Support Team"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "An earlier completed outbox request with this idempotency key was returned.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SendResult"
-                }
-              }
-            }
-          },
-          "202": {
-            "description": "The persisted reply is pending outbox delivery.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SendResult"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "413": {
-            "$ref": "#/components/responses/PayloadTooLarge"
-          },
-          "415": {
-            "$ref": "#/components/responses/UnsupportedContentEncoding"
-          },
-          "500": {
-            "$ref": "#/components/responses/ServerError"
-          },
-          "502": {
-            "description": "An earlier outbox request completed as failed or indeterminate.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SendFailure"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "The selected parent RFC Message-ID could not be retrieved.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/conversations/v1/topics/{topicType}/{externalTopicId}": {
-      "get": {
-        "operationId": "getConversationByTopic",
-        "deprecated": true,
-        "summary": "Get a conversation by external topic",
-        "description": "Deprecated frozen V1 read operation with no announced sunset. Reads are not version-filtered and do not demote a V2 conversation.",
-        "tags": ["Conversations"],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/TopicType"
-          },
-          {
-            "$ref": "#/components/parameters/ExternalTopicId"
-          },
-          {
-            "$ref": "#/components/parameters/Limit"
-          },
-          {
-            "$ref": "#/components/parameters/Before"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Conversation and a chronological page of messages.",
-            "content": {
-              "application/json": {
-                "example": {
-                  "id": "019808b9-37c4-7ed7-93c5-8960f0b690aa",
-                  "topic": {
-                    "type": "booking",
-                    "externalId": "4821",
-                    "title": "Booking 4821"
-                  },
-                  "title": "Booking 4821",
-                  "subject": "Booking 4821",
-                  "participant": {
-                    "address": "person@example.com",
-                    "name": "Person"
-                  },
-                  "replyToAddress": "mailbox+c_8f2a1b9d4f8c4fd2a7319df35a6c041e@replies.example.com",
-                  "state": "awaiting_participant",
-                  "stateChangedAt": "2026-07-18T12:05:00.000Z",
-                  "awaitingReply": false,
-                  "lastMessageAt": "2026-07-18T12:05:00.000Z",
-                  "createdAt": "2026-07-18T12:00:00.000Z",
-                  "updatedAt": "2026-07-18T12:05:00.000Z",
-                  "messages": [
-                    {
-                      "id": "019808b9-37c4-7ed7-93c5-8960f0b690ab",
-                      "parentMessageId": null,
-                      "direction": "outbound",
-                      "state": "accepted",
-                      "stateDetail": null,
-                      "deliveryState": "delivered",
-                      "deliveryStateDetail": null,
-                      "deliveredAt": "2026-07-18T12:00:30.000Z",
-                      "resendEmailId": "sent_123",
-                      "internetMessageId": "<sent-1@resend.test>",
-                      "from": {
-                        "address": "mailbox@example.com",
-                        "name": "Mailbox"
-                      },
-                      "to": "person@example.com",
-                      "replyTo": "mailbox+c_8f2a1b9d4f8c4fd2a7319df35a6c041e@replies.example.com",
-                      "replyToName": null,
-                      "subject": "Booking 4821",
-                      "text": "Your booking request was received.",
-                      "html": null,
-                      "createdAt": "2026-07-18T12:00:00.000Z"
-                    }
-                  ],
-                  "page": {
-                    "hasMoreBefore": false,
-                    "before": null
-                  }
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/Conversation"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "500": {
-            "$ref": "#/components/responses/ServerError"
-          }
-        }
-      }
-    },
     "/api/emails/v2": {
       "post": {
         "operationId": "sendDirectEmailV2",
         "summary": "Send a direct email without a conversation",
         "description": "Persists a direct outbound email intent and synchronously sends it through Resend. The normalized from.address must exactly match a FROM allowlist entry; recipients are not allowlisted. No conversation, parent, routing token, Reply-To header, or RFC threading headers are created. Without a Reply-To header, mail clients normally direct replies to the From address.",
         "tags": ["Direct email"],
-        "security": [{ "emailV2Auth": [] }],
-        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
+        "security": [
+          {
+            "emailV2Auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
-              "schema": { "$ref": "#/components/schemas/DirectEmailV2Request" },
+              "schema": {
+                "$ref": "#/components/schemas/DirectEmailV2Request"
+              },
               "example": {
                 "from": {
                   "address": "notifications@example.com",
@@ -1280,7 +346,12 @@
                 "subject": "Verify your email",
                 "text": "Use the verification link.",
                 "html": "<p>Use the verification link.</p>",
-                "tags": [{ "name": "category", "value": "confirm_email" }]
+                "tags": [
+                  {
+                    "name": "category",
+                    "value": "confirm_email"
+                  }
+                ]
               }
             }
           }
@@ -1323,14 +394,24 @@
               }
             }
           },
-          "400": { "$ref": "#/components/responses/BadRequest" },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "409": { "$ref": "#/components/responses/Conflict" },
-          "413": { "$ref": "#/components/responses/PayloadTooLarge" },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
           "415": {
             "$ref": "#/components/responses/UnsupportedContentEncoding"
           },
-          "500": { "$ref": "#/components/responses/ServerError" },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          },
           "502": {
             "description": "The persisted send failed or its provider outcome is indeterminate.",
             "content": {
@@ -1350,13 +431,23 @@
         "summary": "Enqueue a direct email without a conversation",
         "description": "Atomically persists a pending direct email and shared outbox entry without calling Resend. Validation, multiple-recipient support, tags, exact FROM authorization, and Reply-To rejection match the synchronous direct-email operation. Later allowlist removal does not cancel already-persisted intent. Replaying the same key and normalized queued request returns 202 while pending, 200 after acceptance, or 502 after a failed or indeterminate drain outcome.",
         "tags": ["Direct email", "Outbox"],
-        "security": [{ "emailV2Auth": [] }],
-        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
+        "security": [
+          {
+            "emailV2Auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
-              "schema": { "$ref": "#/components/schemas/DirectEmailV2Request" },
+              "schema": {
+                "$ref": "#/components/schemas/DirectEmailV2Request"
+              },
               "example": {
                 "from": {
                   "address": "notifications@example.com",
@@ -1370,7 +461,12 @@
                 ],
                 "subject": "Verify your email",
                 "html": "<p>Use the verification link.</p>",
-                "tags": [{ "name": "category", "value": "verification" }]
+                "tags": [
+                  {
+                    "name": "category",
+                    "value": "verification"
+                  }
+                ]
               }
             }
           }
@@ -1403,14 +499,24 @@
               }
             }
           },
-          "400": { "$ref": "#/components/responses/BadRequest" },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "409": { "$ref": "#/components/responses/Conflict" },
-          "413": { "$ref": "#/components/responses/PayloadTooLarge" },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
           "415": {
             "$ref": "#/components/responses/UnsupportedContentEncoding"
           },
-          "500": { "$ref": "#/components/responses/ServerError" },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          },
           "502": {
             "description": "The queued email was later marked failed or indeterminate.",
             "content": {
@@ -1430,13 +536,21 @@
         "summary": "Deliver one shared outbox batch",
         "description": "Email-namespaced alias for the shared outbox drain. It uses only OUTBOX_DRAIN_API_KEY and may deliver direct, V1 conversation, and V2 conversation messages in one fixed ordered batch. Operators should schedule one drain alias rather than invoke every alias.",
         "tags": ["Outbox"],
-        "security": [{ "outboxDrainAuth": [] }],
+        "security": [
+          {
+            "outboxDrainAuth": []
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
-              "schema": { "$ref": "#/components/schemas/DrainOutboxRequest" },
-              "example": { "limit": 100 }
+              "schema": {
+                "$ref": "#/components/schemas/DrainOutboxRequest"
+              },
+              "example": {
+                "limit": 100
+              }
             }
           }
         },
@@ -1445,17 +559,27 @@
             "description": "The bounded shared drain invocation completed, including persisted retry scheduling when applicable.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/DrainOutboxResult" }
+                "schema": {
+                  "$ref": "#/components/schemas/DrainOutboxResult"
+                }
               }
             }
           },
-          "400": { "$ref": "#/components/responses/BadRequest" },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "413": { "$ref": "#/components/responses/PayloadTooLarge" },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
           "415": {
             "$ref": "#/components/responses/UnsupportedContentEncoding"
           },
-          "500": { "$ref": "#/components/responses/ServerError" }
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
         }
       }
     },
@@ -1465,8 +589,16 @@
         "summary": "Start a topic conversation with explicit identities",
         "description": "Creates the single conversation for an external topic and sends its opening email. message.from and message.replyTo are required structured identities. Optional message.to recipients override the outbound recipient list but do not change the single conversation participant; when omitted, the email is sent to participant. Optional message.tags are forwarded to Resend. From and Reply-To normalized addresses must have exact allowlist rows for the FROM and REPLY_TO roles respectively. The Reply-To address must be an untagged base address; the service persists it for the conversation and sends from base-local+c_<32 lowercase hex routing token>@domain. Identity or fixed-base rejection uses one generic 400 response. A failed V1 topic conversation may be reopened and promoted to V2 when all prior messages are failed and its persisted Reply-To base is absent or equals the requested base. Promotion occurs when the V2 intent is successfully persisted, before the provider call, so a subsequent 502 does not undo it.",
         "tags": ["Conversations"],
-        "security": [{ "emailV2Auth": [] }],
-        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
+        "security": [
+          {
+            "emailV2Auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -1504,7 +636,12 @@
                     "address": "booking-replies@mail.example.com",
                     "name": "Booking Team"
                   },
-                  "tags": [{ "name": "category", "value": "booking_update" }]
+                  "tags": [
+                    {
+                      "name": "category",
+                      "value": "booking_update"
+                    }
+                  ]
                 }
               }
             }
@@ -1515,7 +652,9 @@
             "description": "An earlier completed request with this idempotency key was returned.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/SendResult" }
+                "schema": {
+                  "$ref": "#/components/schemas/SendResult"
+                }
               }
             }
           },
@@ -1523,7 +662,9 @@
             "description": "Conversation created, or a failed topic conversation reopened and promoted to V2, and the opening email accepted by Resend.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/SendResult" }
+                "schema": {
+                  "$ref": "#/components/schemas/SendResult"
+                }
               }
             }
           },
@@ -1531,7 +672,9 @@
             "description": "An earlier request with this idempotency key is still pending.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/SendResult" }
+                "schema": {
+                  "$ref": "#/components/schemas/SendResult"
+                }
               }
             }
           },
@@ -1539,7 +682,9 @@
             "description": "The request is malformed, failed validation, or requested an identity or Reply-To base that is not allowed. Authorization policy rejection is deliberately generic.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/Error" },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
                 "examples": {
                   "identityRejected": {
                     "value": {
@@ -1550,25 +695,35 @@
               }
             }
           },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "409": {
             "description": "The idempotency key conflicts or the topic already has a conversation with at least one message that is not failed.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/Error" }
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
               }
             }
           },
-          "413": { "$ref": "#/components/responses/PayloadTooLarge" },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
           "415": {
             "$ref": "#/components/responses/UnsupportedContentEncoding"
           },
-          "500": { "$ref": "#/components/responses/ServerError" },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          },
           "502": {
             "description": "Resend did not accept the email or the send result is indeterminate. If this request reopened a V1 conversation, its V2 promotion was already committed with the persisted intent.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/SendFailure" }
+                "schema": {
+                  "$ref": "#/components/schemas/SendFailure"
+                }
               }
             }
           }
@@ -1579,20 +734,31 @@
         "summary": "List unassigned inbound conversations",
         "description": "V2 mirror of the unassigned conversation list. Reads are not version-filtered.",
         "tags": ["Conversations"],
-        "security": [{ "emailV2Auth": [] }],
+        "security": [
+          {
+            "emailV2Auth": []
+          }
+        ],
         "parameters": [
           {
             "name": "assignment",
             "in": "query",
             "required": true,
-            "schema": { "type": "string", "const": "unassigned" }
+            "schema": {
+              "type": "string",
+              "const": "unassigned"
+            }
           },
-          { "$ref": "#/components/parameters/Limit" },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
           {
             "name": "before",
             "in": "query",
             "description": "Opaque cursor returned by the previous unassigned-conversation page.",
-            "schema": { "type": "string" }
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -1606,9 +772,15 @@
               }
             }
           },
-          "400": { "$ref": "#/components/responses/BadRequest" },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "500": { "$ref": "#/components/responses/ServerError" }
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
         }
       }
     },
@@ -1618,7 +790,11 @@
         "summary": "Summarize conversations by state",
         "description": "Returns conversation counts for every state plus a paginated list of conversations in the selected states, ordered by oldest state change first so state=awaiting_us reads as a reply queue. Items carry conversation metadata only; read messages from the conversation endpoint. Reads are not version-filtered.",
         "tags": ["Conversations"],
-        "security": [{ "emailV2Auth": [] }],
+        "security": [
+          {
+            "emailV2Auth": []
+          }
+        ],
         "parameters": [
           {
             "name": "state",
@@ -1627,15 +803,21 @@
             "explode": true,
             "schema": {
               "type": "array",
-              "items": { "$ref": "#/components/schemas/ConversationState" }
+              "items": {
+                "$ref": "#/components/schemas/ConversationState"
+              }
             }
           },
-          { "$ref": "#/components/parameters/Limit" },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
           {
             "name": "before",
             "in": "query",
             "description": "Opaque cursor returned by the previous state-summary page.",
-            "schema": { "type": "string" }
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -1649,9 +831,15 @@
               }
             }
           },
-          "400": { "$ref": "#/components/responses/BadRequest" },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "500": { "$ref": "#/components/responses/ServerError" }
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
         }
       }
     },
@@ -1661,8 +849,16 @@
         "summary": "Queue a topic conversation with explicit identities",
         "description": "Atomically creates the V2 conversation, pending opening message, and outbox entry. Identity allowlist and fixed Reply-To base rules match the synchronous V2 operation. Allowlist authorization is frozen into the queued message; later allowlist removal does not cancel an already-authorized outbox intent. Replaying the same idempotency key and normalized request returns 202 while the stored message remains pending, 200 after acceptance, or 502 after a failed or indeterminate outcome.",
         "tags": ["Outbox"],
-        "security": [{ "emailV2Auth": [] }],
-        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
+        "security": [
+          {
+            "emailV2Auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -1678,7 +874,9 @@
             "description": "An earlier completed outbox request with this idempotency key was returned.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/SendResult" }
+                "schema": {
+                  "$ref": "#/components/schemas/SendResult"
+                }
               }
             }
           },
@@ -1686,7 +884,9 @@
             "description": "The persisted V2 opening message is pending outbox delivery, including an idempotent replay while that stored message remains pending.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/SendResult" }
+                "schema": {
+                  "$ref": "#/components/schemas/SendResult"
+                }
               }
             }
           },
@@ -1694,22 +894,34 @@
             "description": "The request is malformed, failed validation, or requested an identity or Reply-To base that is not allowed. Authorization policy rejection is deliberately generic.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/Error" }
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
               }
             }
           },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "409": { "$ref": "#/components/responses/Conflict" },
-          "413": { "$ref": "#/components/responses/PayloadTooLarge" },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
           "415": {
             "$ref": "#/components/responses/UnsupportedContentEncoding"
           },
-          "500": { "$ref": "#/components/responses/ServerError" },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          },
           "502": {
             "description": "An earlier outbox request completed as failed or indeterminate.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/SendFailure" }
+                "schema": {
+                  "$ref": "#/components/schemas/SendFailure"
+                }
               }
             }
           }
@@ -1723,13 +935,21 @@
         "summary": "Deliver one shared outbox batch using a deprecated alias",
         "description": "Deprecated compatibility alias for POST /api/emails/v2/outbox/drain with no announced sunset. It uses only the dedicated drain credential and retains identical shared behavior, including delivery of direct, V1 conversation, and V2 conversation messages from the same persisted outbox. New scheduler integrations must use the email-namespaced route.",
         "tags": ["Outbox"],
-        "security": [{ "outboxDrainAuth": [] }],
+        "security": [
+          {
+            "outboxDrainAuth": []
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
-              "schema": { "$ref": "#/components/schemas/DrainOutboxRequest" },
-              "example": { "limit": 100 }
+              "schema": {
+                "$ref": "#/components/schemas/DrainOutboxRequest"
+              },
+              "example": {
+                "limit": 100
+              }
             }
           }
         },
@@ -1738,45 +958,77 @@
             "description": "The bounded drain invocation completed, including persisted retry scheduling when applicable.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/DrainOutboxResult" }
+                "schema": {
+                  "$ref": "#/components/schemas/DrainOutboxResult"
+                }
               }
             }
           },
-          "400": { "$ref": "#/components/responses/BadRequest" },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "413": { "$ref": "#/components/responses/PayloadTooLarge" },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
           "415": {
             "$ref": "#/components/responses/UnsupportedContentEncoding"
           },
-          "500": { "$ref": "#/components/responses/ServerError" }
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
         }
       }
     },
     "/api/conversations/v2/{conversationId}": {
-      "parameters": [{ "$ref": "#/components/parameters/ConversationId" }],
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ConversationId"
+        }
+      ],
       "get": {
         "operationId": "getConversationV2",
         "summary": "Get a conversation by service ID",
         "description": "Reads any conversation visible to the service, including V1 conversations; reading does not promote it to V2.",
         "tags": ["Conversations"],
-        "security": [{ "emailV2Auth": [] }],
+        "security": [
+          {
+            "emailV2Auth": []
+          }
+        ],
         "parameters": [
-          { "$ref": "#/components/parameters/Limit" },
-          { "$ref": "#/components/parameters/Before" }
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Before"
+          }
         ],
         "responses": {
           "200": {
             "description": "Conversation and a chronological page of messages.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/Conversation" }
+                "schema": {
+                  "$ref": "#/components/schemas/Conversation"
+                }
               }
             }
           },
-          "400": { "$ref": "#/components/responses/BadRequest" },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "500": { "$ref": "#/components/responses/ServerError" }
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
         }
       },
       "patch": {
@@ -1784,12 +1036,18 @@
         "summary": "Assign an unassigned conversation through V2",
         "description": "Assigns a topic exactly once and records the conversation as V2. The conversation must be unassigned and its API version must be null or already V2; a V1 conversation cannot be assigned through this operation.",
         "tags": ["Conversations"],
-        "security": [{ "emailV2Auth": [] }],
+        "security": [
+          {
+            "emailV2Auth": []
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
-              "schema": { "$ref": "#/components/schemas/AssignTopicRequest" }
+              "schema": {
+                "$ref": "#/components/schemas/AssignTopicRequest"
+              }
             }
           }
         },
@@ -1798,19 +1056,33 @@
             "description": "Assigned V2 conversation.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/Conversation" }
+                "schema": {
+                  "$ref": "#/components/schemas/Conversation"
+                }
               }
             }
           },
-          "400": { "$ref": "#/components/responses/BadRequest" },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "409": { "$ref": "#/components/responses/Conflict" },
-          "413": { "$ref": "#/components/responses/PayloadTooLarge" },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
           "415": {
             "$ref": "#/components/responses/UnsupportedContentEncoding"
           },
-          "500": { "$ref": "#/components/responses/ServerError" }
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
         }
       }
     },
@@ -1820,8 +1092,16 @@
         "summary": "Set the conversation state",
         "description": "Operator override for the conversation state, most commonly marking a conversation concluded when it needs no follow-up. Every state is settable and every transition is permitted, including reopening a terminated conversation. Setting the state a conversation already holds succeeds, so retries are safe. No email is sent or enqueued, so no Idempotency-Key is required.",
         "tags": ["Conversations"],
-        "security": [{ "emailV2Auth": [] }],
-        "parameters": [{ "$ref": "#/components/parameters/ConversationId" }],
+        "security": [
+          {
+            "emailV2Auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ConversationId"
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -1829,7 +1109,9 @@
               "schema": {
                 "$ref": "#/components/schemas/SetConversationStateRequest"
               },
-              "example": { "state": "concluded" }
+              "example": {
+                "state": "concluded"
+              }
             }
           }
         },
@@ -1838,18 +1120,30 @@
             "description": "The conversation with its updated state.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/Conversation" }
+                "schema": {
+                  "$ref": "#/components/schemas/Conversation"
+                }
               }
             }
           },
-          "400": { "$ref": "#/components/responses/BadRequest" },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "413": { "$ref": "#/components/responses/PayloadTooLarge" },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
           "415": {
             "$ref": "#/components/responses/UnsupportedContentEncoding"
           },
-          "500": { "$ref": "#/components/responses/ServerError" }
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
         }
       }
     },
@@ -1859,10 +1153,18 @@
         "summary": "Continue a conversation with explicit identities",
         "description": "Sends a reply using required from and replyTo identities. Optional to recipients override the outbound recipient list but do not change the single conversation participant; when omitted, the reply is sent to participant. Optional tags are forwarded to Resend. Exact role-specific allowlist rows are checked before conversation lookup. The requested Reply-To base must equal the conversation's persisted base once set. Persisting the V2 reply intent atomically promotes a V1 conversation to V2 and makes future V1 reply and enqueue writes return 409. Promotion does not require provider acceptance and remains committed if the subsequent synchronous provider call returns 502. Parent selection and RFC threading match V1.",
         "tags": ["Messages"],
-        "security": [{ "emailV2Auth": [] }],
+        "security": [
+          {
+            "emailV2Auth": []
+          }
+        ],
         "parameters": [
-          { "$ref": "#/components/parameters/ConversationId" },
-          { "$ref": "#/components/parameters/IdempotencyKey" }
+          {
+            "$ref": "#/components/parameters/ConversationId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
         ],
         "requestBody": {
           "required": true,
@@ -1891,7 +1193,12 @@
                   "address": "booking-replies@mail.example.com",
                   "name": "Booking Team"
                 },
-                "tags": [{ "name": "category", "value": "conversation_reply" }]
+                "tags": [
+                  {
+                    "name": "category",
+                    "value": "conversation_reply"
+                  }
+                ]
               }
             }
           }
@@ -1901,7 +1208,9 @@
             "description": "An earlier completed request with this idempotency key was returned.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/SendResult" }
+                "schema": {
+                  "$ref": "#/components/schemas/SendResult"
+                }
               }
             }
           },
@@ -1909,7 +1218,9 @@
             "description": "Reply accepted by Resend; a V1 conversation is promoted to V2 as part of persistence.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/SendResult" }
+                "schema": {
+                  "$ref": "#/components/schemas/SendResult"
+                }
               }
             }
           },
@@ -1917,7 +1228,9 @@
             "description": "An earlier request with this idempotency key is still pending.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/SendResult" }
+                "schema": {
+                  "$ref": "#/components/schemas/SendResult"
+                }
               }
             }
           },
@@ -1925,26 +1238,40 @@
             "description": "The request is malformed, failed validation, or requested an identity or Reply-To base that is not allowed. Authorization policy rejection is deliberately generic.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/Error" },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
                 "example": {
                   "error": "The requested email identity is not allowed. Contact the administrator."
                 }
               }
             }
           },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "409": { "$ref": "#/components/responses/Conflict" },
-          "413": { "$ref": "#/components/responses/PayloadTooLarge" },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
           "415": {
             "$ref": "#/components/responses/UnsupportedContentEncoding"
           },
-          "500": { "$ref": "#/components/responses/ServerError" },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          },
           "502": {
             "description": "Resend did not accept the email or the send result is indeterminate. When replying to a V1 conversation, V2 promotion was already committed with the persisted intent.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/SendFailure" }
+                "schema": {
+                  "$ref": "#/components/schemas/SendFailure"
+                }
               }
             }
           },
@@ -1952,7 +1279,9 @@
             "description": "The selected parent RFC Message-ID could not be retrieved.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/Error" }
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
               }
             }
           }
@@ -1965,10 +1294,18 @@
         "summary": "Queue a conversation reply with explicit identities",
         "description": "Resolves and freezes the reply parent, RFC ancestry, approved identities, and generated Reply-To address, then atomically creates a pending message and outbox entry. A V1 conversation is promoted to V2 when the queued intent is persisted. Later allowlist removal does not cancel that queued intent. Replaying the same idempotency key and normalized request returns 202 while the stored message remains pending, 200 after acceptance, or 502 after a failed or indeterminate outcome.",
         "tags": ["Outbox"],
-        "security": [{ "emailV2Auth": [] }],
+        "security": [
+          {
+            "emailV2Auth": []
+          }
+        ],
         "parameters": [
-          { "$ref": "#/components/parameters/ConversationId" },
-          { "$ref": "#/components/parameters/IdempotencyKey" }
+          {
+            "$ref": "#/components/parameters/ConversationId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
         ],
         "requestBody": {
           "required": true,
@@ -1985,7 +1322,9 @@
             "description": "An earlier completed outbox request with this idempotency key was returned.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/SendResult" }
+                "schema": {
+                  "$ref": "#/components/schemas/SendResult"
+                }
               }
             }
           },
@@ -1993,7 +1332,9 @@
             "description": "The persisted V2 reply is pending outbox delivery, including an idempotent replay while that stored message remains pending; a V1 conversation is promoted to V2 as part of persistence.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/SendResult" }
+                "schema": {
+                  "$ref": "#/components/schemas/SendResult"
+                }
               }
             }
           },
@@ -2001,23 +1342,37 @@
             "description": "The request is malformed, failed validation, or requested an identity or Reply-To base that is not allowed. Authorization policy rejection is deliberately generic.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/Error" }
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
               }
             }
           },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "409": { "$ref": "#/components/responses/Conflict" },
-          "413": { "$ref": "#/components/responses/PayloadTooLarge" },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
           "415": {
             "$ref": "#/components/responses/UnsupportedContentEncoding"
           },
-          "500": { "$ref": "#/components/responses/ServerError" },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          },
           "502": {
             "description": "An earlier outbox request completed as failed or indeterminate.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/SendFailure" }
+                "schema": {
+                  "$ref": "#/components/schemas/SendFailure"
+                }
               }
             }
           },
@@ -2025,7 +1380,9 @@
             "description": "The selected parent RFC Message-ID could not be retrieved.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/Error" }
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
               }
             }
           }
@@ -2038,37 +1395,54 @@
         "summary": "Get a conversation by external topic",
         "description": "Reads any conversation for the topic, including V1 conversations; reading does not promote it to V2.",
         "tags": ["Conversations"],
-        "security": [{ "emailV2Auth": [] }],
+        "security": [
+          {
+            "emailV2Auth": []
+          }
+        ],
         "parameters": [
-          { "$ref": "#/components/parameters/TopicType" },
-          { "$ref": "#/components/parameters/ExternalTopicId" },
-          { "$ref": "#/components/parameters/Limit" },
-          { "$ref": "#/components/parameters/Before" }
+          {
+            "$ref": "#/components/parameters/TopicType"
+          },
+          {
+            "$ref": "#/components/parameters/ExternalTopicId"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Before"
+          }
         ],
         "responses": {
           "200": {
             "description": "Conversation and a chronological page of messages.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/Conversation" }
+                "schema": {
+                  "$ref": "#/components/schemas/Conversation"
+                }
               }
             }
           },
-          "400": { "$ref": "#/components/responses/BadRequest" },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "500": { "$ref": "#/components/responses/ServerError" }
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
         }
       }
     }
   },
   "components": {
     "securitySchemes": {
-      "bearerAuth": {
-        "type": "http",
-        "scheme": "bearer",
-        "description": "Deprecated conversation API v1 credential supplied from CONVERSATION_API_KEY. V1 is frozen and has no announced sunset."
-      },
       "emailV2Auth": {
         "type": "http",
         "scheme": "bearer",
@@ -2242,12 +1616,16 @@
       },
       "EmailRecipientList": {
         "oneOf": [
-          { "$ref": "#/components/schemas/EmailIdentity" },
+          {
+            "$ref": "#/components/schemas/EmailIdentity"
+          },
           {
             "type": "array",
             "minItems": 1,
             "maxItems": 50,
-            "items": { "$ref": "#/components/schemas/EmailIdentity" }
+            "items": {
+              "$ref": "#/components/schemas/EmailIdentity"
+            }
           }
         ],
         "description": "One recipient identity or an array of 1-50 recipient identities. A singular identity is accepted for compatibility."
@@ -2286,75 +1664,6 @@
           }
         ]
       },
-      "MessageContent": {
-        "type": "object",
-        "properties": {
-          "text": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 1048576,
-            "description": "Plain text body. Must be a nonempty string when present."
-          },
-          "html": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 1048576,
-            "description": "HTML body. Must be a nonempty string when present."
-          },
-          "replyToName": {
-            "type": ["string", "null"],
-            "maxLength": 256,
-            "pattern": "^[^\\u0000-\\u001F\\u007F<>]{0,256}$",
-            "description": "Optional per-message display name for the service-generated Reply-To address. Blank or null values are omitted. The generated address is unchanged."
-          }
-        },
-        "anyOf": [
-          {
-            "required": ["text"]
-          },
-          {
-            "required": ["html"]
-          }
-        ]
-      },
-      "CreateConversationRequest": {
-        "type": "object",
-        "required": ["topic", "participant", "message"],
-        "properties": {
-          "topic": {
-            "$ref": "#/components/schemas/Topic"
-          },
-          "participant": {
-            "$ref": "#/components/schemas/Participant"
-          },
-          "subject": {
-            "type": "string",
-            "description": "Defaults to the topic title after trimming and stripping leading Re:/Fw:/Fwd: prefixes. Header-safe text: no ASCII control characters. Blank values are omitted.",
-            "maxLength": 255,
-            "pattern": "^[^\\u0000-\\u001F\\u007F]{0,255}$"
-          },
-          "message": {
-            "$ref": "#/components/schemas/MessageContent"
-          }
-        }
-      },
-      "CreateMessageRequest": {
-        "allOf": [
-          {
-            "$ref": "#/components/schemas/MessageContent"
-          },
-          {
-            "type": "object",
-            "properties": {
-              "replyToMessageId": {
-                "type": "string",
-                "format": "uuid",
-                "description": "Internal message ID. Defaults to the latest accepted or received message."
-              }
-            }
-          }
-        ]
-      },
       "MessageContentV2": {
         "type": "object",
         "required": ["from", "replyTo"],
@@ -2372,7 +1681,11 @@
             "description": "HTML body. Must be a nonempty string when present."
           },
           "from": {
-            "allOf": [{ "$ref": "#/components/schemas/EmailIdentity" }],
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/EmailIdentity"
+              }
+            ],
             "description": "Required sender identity. The normalized address must exactly match a database allowlist row with role FROM."
           },
           "to": {
@@ -2387,27 +1700,42 @@
           },
           "replyToName": false
         },
-        "anyOf": [{ "required": ["text"] }, { "required": ["html"] }]
+        "anyOf": [
+          {
+            "required": ["text"]
+          },
+          {
+            "required": ["html"]
+          }
+        ]
       },
       "CreateConversationV2Request": {
         "type": "object",
         "required": ["topic", "participant", "message"],
         "properties": {
-          "topic": { "$ref": "#/components/schemas/Topic" },
-          "participant": { "$ref": "#/components/schemas/Participant" },
+          "topic": {
+            "$ref": "#/components/schemas/Topic"
+          },
+          "participant": {
+            "$ref": "#/components/schemas/Participant"
+          },
           "subject": {
             "type": "string",
             "description": "Defaults to the topic title after trimming and stripping leading Re:/Fw:/Fwd: prefixes. Header-safe text: no ASCII control characters. Blank values are omitted.",
             "maxLength": 255,
             "pattern": "^[^\\u0000-\\u001F\\u007F]{0,255}$"
           },
-          "message": { "$ref": "#/components/schemas/MessageContentV2" }
+          "message": {
+            "$ref": "#/components/schemas/MessageContentV2"
+          }
         },
         "description": "V2 does not support the V1 message.replyToName property; use message.replyTo.name."
       },
       "CreateMessageV2Request": {
         "allOf": [
-          { "$ref": "#/components/schemas/MessageContentV2" },
+          {
+            "$ref": "#/components/schemas/MessageContentV2"
+          },
           {
             "type": "object",
             "properties": {
@@ -2427,7 +1755,11 @@
         "required": ["from", "to", "subject"],
         "properties": {
           "from": {
-            "allOf": [{ "$ref": "#/components/schemas/EmailIdentity" }],
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/EmailIdentity"
+              }
+            ],
             "description": "Sender identity. The normalized address must exactly match a database allowlist row with role FROM."
           },
           "to": {
@@ -2457,14 +1789,23 @@
           },
           "replyTo": false
         },
-        "anyOf": [{ "required": ["text"] }, { "required": ["html"] }],
+        "anyOf": [
+          {
+            "required": ["text"]
+          },
+          {
+            "required": ["html"]
+          }
+        ],
         "description": "Direct email intentionally does not support Reply-To or threading fields."
       },
       "AssignTopicRequest": {
         "type": "object",
         "required": ["topic"],
         "properties": {
-          "topic": { "$ref": "#/components/schemas/Topic" }
+          "topic": {
+            "$ref": "#/components/schemas/Topic"
+          }
         }
       },
       "UnassignedConversationList": {
@@ -2473,13 +1814,17 @@
         "properties": {
           "conversations": {
             "type": "array",
-            "items": { "$ref": "#/components/schemas/ConversationSummary" }
+            "items": {
+              "$ref": "#/components/schemas/ConversationSummary"
+            }
           },
           "page": {
             "type": "object",
             "required": ["hasMore", "before"],
             "properties": {
-              "hasMore": { "type": "boolean" },
+              "hasMore": {
+                "type": "boolean"
+              },
               "before": {
                 "type": ["string", "null"],
                 "description": "Opaque base64url cursor for the next unassigned-conversation page."
@@ -2707,10 +2052,22 @@
           "terminated"
         ],
         "properties": {
-          "awaiting_us": { "type": "integer", "minimum": 0 },
-          "awaiting_participant": { "type": "integer", "minimum": 0 },
-          "concluded": { "type": "integer", "minimum": 0 },
-          "terminated": { "type": "integer", "minimum": 0 }
+          "awaiting_us": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "awaiting_participant": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "concluded": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "terminated": {
+            "type": "integer",
+            "minimum": 0
+          }
         }
       },
       "ConversationStateSummaryItem": {
@@ -2728,22 +2085,43 @@
           "lastMessageAt"
         ],
         "properties": {
-          "id": { "type": "string", "format": "uuid" },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "topic": {
             "oneOf": [
-              { "$ref": "#/components/schemas/Topic" },
-              { "type": "null" }
+              {
+                "$ref": "#/components/schemas/Topic"
+              },
+              {
+                "type": "null"
+              }
             ]
           },
-          "title": { "type": "string" },
-          "subject": { "type": "string" },
+          "title": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
           "participant": {
             "$ref": "#/components/schemas/ParticipantResponse"
           },
-          "state": { "$ref": "#/components/schemas/ConversationState" },
-          "stateChangedAt": { "type": "string", "format": "date-time" },
-          "awaitingReply": { "type": "boolean" },
-          "lastMessageAt": { "type": "string", "format": "date-time" }
+          "state": {
+            "$ref": "#/components/schemas/ConversationState"
+          },
+          "stateChangedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "awaitingReply": {
+            "type": "boolean"
+          },
+          "lastMessageAt": {
+            "type": "string",
+            "format": "date-time"
+          }
         }
       },
       "ConversationStateSummary": {
@@ -2768,8 +2146,12 @@
             "type": "object",
             "required": ["hasMore", "before"],
             "properties": {
-              "hasMore": { "type": "boolean" },
-              "before": { "type": ["string", "null"] }
+              "hasMore": {
+                "type": "boolean"
+              },
+              "before": {
+                "type": ["string", "null"]
+              }
             }
           }
         }
@@ -2778,7 +2160,9 @@
         "type": "object",
         "required": ["state"],
         "properties": {
-          "state": { "$ref": "#/components/schemas/ConversationState" }
+          "state": {
+            "$ref": "#/components/schemas/ConversationState"
+          }
         }
       },
       "Conversation": {
@@ -2828,7 +2212,9 @@
             "format": "email",
             "description": "Stable generated Reply-To routing address. Its base is fixed on first outbound intent and the same per-conversation +c_<32 lowercase hex token> is preserved."
           },
-          "state": { "$ref": "#/components/schemas/ConversationState" },
+          "state": {
+            "$ref": "#/components/schemas/ConversationState"
+          },
           "stateChangedAt": {
             "type": "string",
             "format": "date-time",
@@ -2933,7 +2319,9 @@
             "format": "uuid",
             "description": "Stable internal direct-email intent identifier."
           },
-          "state": { "$ref": "#/components/schemas/DirectEmailState" },
+          "state": {
+            "$ref": "#/components/schemas/DirectEmailState"
+          },
           "resendEmailId": {
             "type": ["string", "null"],
             "description": "Provider identifier after acceptance; null while pending or when no acceptance was confirmed."
@@ -2944,16 +2332,24 @@
         "type": "object",
         "required": ["email"],
         "properties": {
-          "email": { "$ref": "#/components/schemas/DirectEmailSummary" }
+          "email": {
+            "$ref": "#/components/schemas/DirectEmailSummary"
+          }
         }
       },
       "DirectEmailSendFailure": {
         "allOf": [
-          { "$ref": "#/components/schemas/DirectEmailSendResult" },
+          {
+            "$ref": "#/components/schemas/DirectEmailSendResult"
+          },
           {
             "type": "object",
             "required": ["error"],
-            "properties": { "error": { "type": "string" } }
+            "properties": {
+              "error": {
+                "type": "string"
+              }
+            }
           }
         ]
       },

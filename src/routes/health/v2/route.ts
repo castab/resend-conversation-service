@@ -13,10 +13,8 @@ export async function GET(request: Request) {
     !process.env.DATABASE_URL ||
     !process.env.RESEND_API_KEY ||
     !process.env.RESEND_WEBHOOK_SECRET ||
-    !process.env.RESEND_FROM ||
     !process.env.RESEND_REPLY_TO ||
     !isValidReplyToBaseAddress(process.env.RESEND_REPLY_TO) ||
-    !process.env.CONVERSATION_API_KEY ||
     !resolveEmailV2ApiKey() ||
     !process.env.OUTBOX_DRAIN_API_KEY
   ) {

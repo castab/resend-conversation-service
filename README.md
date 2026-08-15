@@ -20,9 +20,8 @@ Resend
 Authorized callers
   -> API gateway or private service address
   -> /api/emails/v2 (synchronous or queued direct email)
-     or /api/conversations/v1 (frozen legacy contract)
-     or /api/conversations/v2 (forward contract)
-  -> version-specific bearer authentication
+     or /api/conversations/v2 (conversation contract)
+  -> purpose-specific bearer authentication
   -> durable PostgreSQL send intent
   -> synchronous Resend send or shared transactional outbox
 ```
@@ -54,15 +53,6 @@ POST  /api/webhooks/resend/v1
 POST  /api/emails/v2
 POST  /api/emails/v2/outbox
 POST  /api/emails/v2/outbox/drain
-POST  /api/conversations/v1
-GET   /api/conversations/v1?assignment=unassigned
-POST  /api/conversations/v1/outbox
-POST  /api/conversations/v1/outbox/drain
-GET   /api/conversations/v1/{conversationId}
-PATCH /api/conversations/v1/{conversationId}
-POST  /api/conversations/v1/{conversationId}/messages
-POST  /api/conversations/v1/{conversationId}/messages/outbox
-GET   /api/conversations/v1/topics/{topicType}/{externalTopicId}
 POST  /api/conversations/v2
 GET   /api/conversations/v2?assignment=unassigned
 GET   /api/conversations/v2/summary
@@ -81,25 +71,24 @@ GET   /openapi.json
 The health endpoint is available at both `/api/health/v2` and
 `/api/health/v1`; `v1` remains as a compatibility alias for deployment
 readiness checks. The webhook requires a valid signature over the exact raw
-body and all three Svix headers. V1 conversation operations require
-`CONVERSATION_API_KEY`; V2 conversation operations and direct email require the
-separate `EMAIL_v2_API_KEY` (or `EMAIL_V2_API_KEY` as a fallback). All three outbox drain routes use
-`OUTBOX_DRAIN_API_KEY`. Sending and enqueueing operations also require
+body and all three Svix headers. Conversation operations and direct email
+require `EMAIL_v2_API_KEY` (or `EMAIL_V2_API_KEY` as a fallback). Both outbox
+drain routes use `OUTBOX_DRAIN_API_KEY`. Sending and enqueueing operations also require
 `Idempotency-Key`.
 
 `POST /api/webhooks/resend/v1` remains the supported long-term Resend webhook
-ingress. Unlike the frozen legacy conversation API, this webhook path is not
-part of a V1-to-V2 migration and will remain active for the foreseeable future.
+ingress. Its `v1` path is unrelated to the retired conversation API and will
+remain active for the foreseeable future.
 
 ### API versions
 
-V1 is the frozen legacy API. Its outbound From and Reply-To identities come
-only from `RESEND_FROM` and `RESEND_REPLY_TO`; callers may supply a Reply-To
-display name but cannot select either mailbox address. V1 has no planned sunset
-and remains available for existing integrations and V1 conversations, but new
-identity-selection behavior belongs in V2.
+Conversation API V1 was retired in 0.5.0. Its routes are no longer registered,
+so `/api/conversations/v1` and everything under it return
+`404 {"error":"Not found"}`, and `CONVERSATION_API_KEY` and `RESEND_FROM` are no
+longer read. Conversations it created are unaffected: they are still served by
+V2 and are promoted to V2 on the first authorized V2 write.
 
-V2 is the forward API. Every create, reply, and corresponding outbox request
+V2 is the only conversation API. Every create, reply, and corresponding outbox request
 must provide structured `from` and `replyTo` objects with an `address` and an
 optional `name`. Both addresses are canonicalized to lowercase and must match
 separate, role-specific database allowlist entries before new send intent is
@@ -114,20 +103,19 @@ email does not accept `replyTo` and emits no Reply-To or RFC threading headers.
 Mail clients normally fall back to the From address when a recipient chooses
 Reply.
 
-A V2 reply promotes a V1 conversation when the V2 send intent is successfully
-persisted, before any synchronous provider call. Promotion therefore remains
-committed even if that provider call subsequently returns `502`; provider
-acceptance is not required. The supplied Reply-To base must match the base
-already fixed on the conversation. Promotion is one-way: later V1 reply and
-assignment writes return `409` with `Conversation requires API v2`; reads remain
-available through both versions.
+A V2 reply promotes a surviving `V1`-tagged conversation when the V2 send intent
+is successfully persisted, before any synchronous provider call. Promotion
+therefore remains committed even if that provider call subsequently returns
+`502`; provider acceptance is not required. The supplied Reply-To base must
+match the base already fixed on the conversation. Promotion is one-way: a
+conversation is never demoted to `V1`.
 
 ## Conversation Model
 
 A caller-owned `(topicType, externalTopicId)` pair identifies a conversation.
-Each conversation currently has one external participant. V1 uses the
-environment-configured sender and Reply-To base; V2 records the selected sender
-on each message and fixes the selected Reply-To base on the conversation. Each
+Each conversation currently has one external participant. V2 records the
+selected sender on each message and fixes the selected Reply-To base on the
+conversation. Each
 conversation also has an opaque routing token. Outbound Reply-To addresses are
 always generated from the fixed base as `<local>+c_<token>@<domain>`, and each
 message may add a display name without changing that address. Messages retain
@@ -172,8 +160,9 @@ filterable page of conversation metadata, oldest state change first, which makes
 from the conversation endpoint. `POST /api/conversations/v2/{conversationId}/state`
 is the operator override, most often used to mark a conversation `concluded` when
 a message such as a bare acknowledgement needs no follow-up. Every transition is
-permitted and repeating one is a successful no-op. State transitions apply to V1
-and V2 conversations alike; only these two routes are V2-only.
+permitted and repeating one is a successful no-op. Transitions are driven by
+mail flow rather than by the route that triggered them, so they apply equally to
+conversations created before the V1 retirement.
 
 Direct email intent uses the same durable message and provider-idempotency
 state machine, but has no conversation relationship. Direct responses expose
@@ -199,21 +188,18 @@ Create an ignored `.env` for local development:
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/resend_test
 RESEND_API_KEY=re_xxxxxxxxx
 RESEND_WEBHOOK_SECRET=whsec_xxxxxxxxx
-RESEND_FROM=Mailbox <mailbox@example.com>
 RESEND_REPLY_TO=mailbox@replies.example.com
-CONVERSATION_API_KEY=replace-with-a-long-random-secret
-EMAIL_v2_API_KEY=replace-with-a-different-long-random-secret
+EMAIL_v2_API_KEY=replace-with-a-long-random-secret
 OUTBOX_DRAIN_API_KEY=replace-with-another-long-random-secret
 ```
 
-`RESEND_FROM`, `RESEND_REPLY_TO`, and `CONVERSATION_API_KEY` define the frozen
-V1 identity and credential. V2 callers use `EMAIL_v2_API_KEY` and select
-only database-allowlisted identities in each request. Deployments may use
-`EMAIL_V2_API_KEY` as an interchangeable fallback; when both variables are
-nonempty, `EMAIL_v2_API_KEY` takes precedence.
+Callers use `EMAIL_v2_API_KEY` and select only database-allowlisted identities
+in each request. Deployments may use `EMAIL_V2_API_KEY` as an interchangeable
+fallback; when both variables are nonempty, `EMAIL_v2_API_KEY` takes precedence.
+`RESEND_REPLY_TO` remains required: it is the Reply-To base used for inbound
+routing-token validation.
 
-Every Reply-To base, whether supplied by V1 configuration or a V2 caller, must
-be a plain mailbox on a Resend Receiving domain, without a display name or an
+Every Reply-To base must be a plain mailbox on a Resend Receiving domain, without a display name or an
 existing `+` tag. Resend must accept every generated
 `mailbox+c_<token>@domain` address. Keep a conversation's base stable while its
 messages can still receive replies.
@@ -306,9 +292,7 @@ TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/resend_test
 RESEND_WEBHOOK_SECRET=whsec_dGVzdF9zZWNyZXRfa2V5X2Zvcl90ZXN0aW5nXzEyMzQ=
 RESEND_API_KEY=test-resend-api-key
 RESEND_API_BASE_URL=http://localhost:4010
-RESEND_FROM=Test Mailbox <mailbox@example.com>
 RESEND_REPLY_TO=mailbox@replies.example.com
-CONVERSATION_API_KEY=test-conversation-api-key
 EMAIL_v2_API_KEY=test-conversation-v2-api-key
 OUTBOX_DRAIN_API_KEY=test-outbox-drain-api-key
 APP_BASE_URL=http://localhost:3000
@@ -388,8 +372,8 @@ Configure Resend to deliver signed events to
 
 Invoke one shared drain route at least once per minute when using asynchronous
 sends. New deployments should use
-`POST /api/emails/v2/outbox/drain`; both versioned conversation drain paths
-remain supported as deprecated compatibility aliases. All routes use the same
+`POST /api/emails/v2/outbox/drain`; `POST /api/conversations/v2/outbox/drain`
+remains supported as a deprecated compatibility alias. All routes use the same
 persisted outbox and drain credential, may process direct and conversation
 intent together, handle one bounded batch per request, and do not poll
 internally. Do not schedule every route for the same interval.

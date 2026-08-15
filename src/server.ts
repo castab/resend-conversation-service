@@ -7,21 +7,8 @@ import express, {
   type RequestHandler,
 } from 'express';
 import swaggerUiDist from 'swagger-ui-dist';
-import { authorize, authorizeEmailV2, authorizeOutboxDrain } from '@/lib/api';
+import { authorizeEmailV2, authorizeOutboxDrain } from '@/lib/api';
 import { getPrismaClient } from '@/lib/database';
-import { POST as enqueueMessage } from '@/routes/conversations/v1/[conversationId]/messages/outbox/route';
-import { POST as sendMessage } from '@/routes/conversations/v1/[conversationId]/messages/route';
-import {
-  GET as getConversation,
-  PATCH as patchConversation,
-} from '@/routes/conversations/v1/[conversationId]/route';
-import { POST as drainOutbox } from '@/routes/conversations/v1/outbox/drain/route';
-import { POST as enqueueConversation } from '@/routes/conversations/v1/outbox/route';
-import {
-  POST as createConversation,
-  GET as listConversations,
-} from '@/routes/conversations/v1/route';
-import { GET as getConversationByTopic } from '@/routes/conversations/v1/topics/[topicType]/[externalTopicId]/route';
 import { POST as enqueueMessageV2 } from '@/routes/conversations/v2/[conversationId]/messages/outbox/route';
 import { POST as sendMessageV2 } from '@/routes/conversations/v2/[conversationId]/messages/route';
 import {
@@ -57,19 +44,6 @@ function authorizationRequest(request: Request): globalThis.Request {
   });
 }
 
-const requireConversationAuth: RequestHandler = (request, response, next) => {
-  const rejected = authorize(authorizationRequest(request));
-  if (rejected) {
-    rejected.headers.forEach((value, name) => {
-      response.setHeader(name, value);
-    });
-    void rejected
-      .text()
-      .then((body) => response.status(rejected.status).send(body));
-    return;
-  }
-  next();
-};
 const requireEmailV2Auth: RequestHandler = (request, response, next) => {
   const rejected = authorizeEmailV2(authorizationRequest(request));
   if (rejected) {
@@ -233,57 +207,6 @@ export function createApp() {
     .route('/api/conversations/v2/:conversationId')
     .get(requireEmailV2Auth, adapt(getConversationV2))
     .patch(requireEmailV2Auth, rawBody, adapt(patchConversationV2));
-
-  app.post(
-    '/api/conversations/v1/outbox/drain',
-    requireDrainAuth,
-    rawBody,
-    adapt(drainOutbox),
-  );
-  app.post(
-    '/api/conversations/v1/outbox',
-    requireConversationAuth,
-    requireIdempotency,
-    rawBody,
-    adapt(enqueueConversation),
-  );
-  app.all(
-    '/api/conversations/v1/outbox',
-    requireConversationAuth,
-    (_request, response) => response.status(404).json({ error: 'Not found' }),
-  );
-  app.get(
-    '/api/conversations/v1/topics/:topicType/:externalTopicId',
-    requireConversationAuth,
-    adapt(getConversationByTopic),
-  );
-  app
-    .route('/api/conversations/v1')
-    .get(requireConversationAuth, adapt(listConversations))
-    .post(
-      requireConversationAuth,
-      requireIdempotency,
-      rawBody,
-      adapt(createConversation),
-    );
-  app.post(
-    '/api/conversations/v1/:conversationId/messages/outbox',
-    requireConversationAuth,
-    requireIdempotency,
-    rawBody,
-    adapt(enqueueMessage),
-  );
-  app.post(
-    '/api/conversations/v1/:conversationId/messages',
-    requireConversationAuth,
-    requireIdempotency,
-    rawBody,
-    adapt(sendMessage),
-  );
-  app
-    .route('/api/conversations/v1/:conversationId')
-    .get(requireConversationAuth, adapt(getConversation))
-    .patch(requireConversationAuth, rawBody, adapt(patchConversation));
 
   app.get('/openapi.json', (_request, response, next) => {
     response.sendFile(

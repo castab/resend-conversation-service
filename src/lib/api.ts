@@ -11,14 +11,6 @@ import {
 } from '@/lib/email';
 import { resolveEmailV2ApiKey } from '@/lib/environment';
 
-export function authorize(request: Request): Response | null {
-  return authorizeWithCredential(
-    request,
-    process.env.CONVERSATION_API_KEY,
-    'CONVERSATION_API_KEY',
-  );
-}
-
 export function authorizeEmailV2(request: Request): Response | null {
   return authorizeWithCredential(
     request,

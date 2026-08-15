@@ -7,6 +7,8 @@ Versioning.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-15
+
 ### Added
 
 - Added a conversation `state` of `awaiting_us`, `awaiting_participant`,
@@ -24,6 +26,37 @@ Versioning.
   state by hand, including marking a conversation `concluded` when it needs no
   follow-up.
 
+### Removed
+
+- **Breaking.** Removed conversation API V1. `POST` and `GET
+  /api/conversations/v1`, `/api/conversations/v1/outbox`,
+  `/api/conversations/v1/outbox/drain`,
+  `/api/conversations/v1/{conversationId}`, its `/messages` and
+  `/messages/outbox` routes, and
+  `/api/conversations/v1/topics/{topicType}/{externalTopicId}` are no longer
+  routed and return `404 {"error":"Not found"}`. Callers migrate to the
+  corresponding `/api/conversations/v2` paths, which require the
+  `EMAIL_v2_API_KEY` credential and structured `from` and `replyTo` identities
+  authorized by exact role-specific allowlist rows; `replyToName` becomes
+  `replyTo.name`.
+- Removed the `CONVERSATION_API_KEY` and `RESEND_FROM` environment variables.
+  Both are no longer read, and health readiness no longer requires them.
+  `RESEND_REPLY_TO` is retained as the Reply-To base for inbound routing-token
+  validation.
+- Removed the `bearerAuth` security scheme from `public/openapi.json`.
+  `emailV2Auth` is now the spec-wide default.
+
+`GET /api/health/v1` and `POST /api/webhooks/resend/v1` are unrelated to this
+retirement and are unchanged.
+
+### Changed
+
+- Moved the shared outbox drain implementation to
+  `POST /api/emails/v2/outbox/drain`, which previously re-exported it from the
+  V1 route tree. `POST /api/conversations/v2/outbox/drain` remains a deprecated
+  compatibility alias with no announced sunset, and drain behavior and its
+  credential are unchanged.
+
 ### Migration
 
 - The conversation-state migration back-fills every conversation that existed before
@@ -31,6 +64,10 @@ Versioning.
   Conversations with unanswered inbound mail from before the upgrade will not appear
   under `state=awaiting_us` until they receive new inbound mail. Operators who need
   the historical backlog must re-derive it themselves.
+- The V1 retirement ships no database migration. Conversations created through V1
+  keep `api_version = 'V1'` and their fixed Reply-To base, remain readable and
+  writable through V2, and are still promoted to `V2` on the first authorized V2
+  write.
 
 ## [0.4.0] - 2026-07-29
 

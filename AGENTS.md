@@ -9,7 +9,8 @@
 - Use the API gateway to control external route exposure; do not weaken
   application-layer authentication based on network placement.
 - Keep `GET /api/health/v1` unauthenticated for readiness checks and return only
-  aggregate status.
+  aggregate status. It is an alias of health v2 and is unaffected by the
+  conversation V1 retirement.
 
 ## Webhook Ingress
 
@@ -25,19 +26,18 @@
 ## Conversation API
 
 - Require bearer authentication on every conversation operation.
-- Keep V1 as the frozen, environment-driven legacy contract using
-  `CONVERSATION_API_KEY`, `RESEND_FROM`, and `RESEND_REPLY_TO`; do not sunset or
-  extend it with caller-selected identities.
-- Keep V2 as the forward contract using the separate
-  `EMAIL_v2_API_KEY`; require structured caller-supplied `from` and
-  `replyTo` identities on every conversation send or enqueue operation.
+- Conversation API V1 was retired in 0.5.0. Do not reintroduce
+  `/api/conversations/v1`, `CONVERSATION_API_KEY`, or `RESEND_FROM`; retired
+  paths fall through to the terminal `404` handler and must not be tombstoned
+  with a dedicated route.
+- Keep V2 as the only conversation contract, using `EMAIL_v2_API_KEY`; require
+  structured caller-supplied `from` and `replyTo` identities on every
+  conversation send or enqueue operation.
 - Require the dedicated drain credential on the outbox drain operation.
 - Keep `POST /api/conversations/v2/outbox/drain` as a deprecated compatibility
   alias. New scheduler integrations use `POST /api/emails/v2/outbox/drain`.
 - Require `Idempotency-Key` on every operation that can send or enqueue email.
 - Persist send intent before calling Resend and never add unbounded retries.
-- In V1, use only the server-configured `RESEND_FROM`; callers cannot choose
-  senders.
 - In V2, authorize canonical lowercase addresses by exact `(address, role)`
   matches in `email_address_allowlist_entries`. Keep `FROM` and `REPLY_TO`
   authorization separate; do not add wildcard, domain, alias, or display-name
@@ -52,16 +52,16 @@
 - Fix the Reply-To base on first outbound intent and preserve the
   per-conversation routing token. A V2 request must not change an existing
   conversation's Reply-To base.
-- Permit one-way V1-to-V2 promotion through an authorized V2 write. Reject
-  subsequent V1 writes to that conversation; do not demote it to V1.
+- Promote surviving `V1`-tagged conversations to `V2` on the first authorized V2
+  write. Promotion stays one-way; never demote a conversation to `V1`.
 - Maintain conversation state from mail flow: inbound projection sets
   `AWAITING_US`, persisted outbound reply intent sets `AWAITING_PARTICIPANT`, and
   a bounced, complained, or suppressed outbound delivery sets `TERMINATED`. Only
   stamp `state_changed_at` when the state value actually changes.
 - Keep `TERMINATED` sticky against automatic transitions and keep the state
   endpoint the only way out of it. Inbound mail reopens `CONCLUDED`.
-- Keep conversation state transitions version-agnostic. Only the summary and
-  state routes are V2-only.
+- Drive conversation state from mail flow rather than from the route that
+  triggered it, so transitions stay correct for promoted legacy conversations.
 - An explicit reply parent must belong to the conversation. Otherwise use the
   latest accepted or received message.
 - Never send a reply without a parent RFC Message-ID.
@@ -85,7 +85,8 @@
   projection while preserving global message idempotency and delivery events.
 - Atomically persist queued direct intent with its outbox entry. Replaying a
   queued operation must never invoke synchronous pending-message recovery.
-- Keep `POST /api/emails/v2/outbox/drain` as an alias of the shared drain using
+- Keep the shared drain implementation in
+  `src/routes/emails/v2/outbox/drain/route.ts` and authorize it with
   `OUTBOX_DRAIN_API_KEY`. Direct and conversation intent may share one ordered
   batch and its retry or terminal outcome.
 
@@ -115,8 +116,9 @@
 ## Contracts And Tests
 
 - Keep `public/openapi.json` aligned with every route or behavior change.
-- Preserve both V1 and V2 contracts and explicit webhook and outbox-drain
-  security overrides in OpenAPI.
+- Preserve the V2 contract and the explicit webhook and outbox-drain security
+  overrides in OpenAPI. `emailV2Auth` is the spec-wide default; do not
+  reintroduce a `bearerAuth` scheme.
 - Integration tests require a dedicated disposable `TEST_DATABASE_URL` and
   truncate application tables.
 - Keep test files serial while they share PostgreSQL and the fake Resend server.

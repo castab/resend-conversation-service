@@ -382,12 +382,13 @@ describe('Direct email API v2', () => {
 
   it('drains direct and conversation intent in one ordered email batch', async () => {
     await allowAddress('system@example.com', 'FROM');
+    await allowAddress(TEST_CONFIG.replyToBaseAddress, 'REPLY_TO');
     const conversation = await fetch(
-      `${TEST_CONFIG.appBaseUrl}/api/conversations/v1/outbox`,
+      `${TEST_CONFIG.appBaseUrl}/api/conversations/v2/outbox`,
       {
         method: 'POST',
         headers: {
-          authorization: `Bearer ${TEST_CONFIG.conversationApiKey}`,
+          authorization: `Bearer ${TEST_CONFIG.emailV2ApiKey}`,
           'content-type': 'application/json',
           'idempotency-key': 'mixed-conversation-outbox',
         },
@@ -398,7 +399,11 @@ describe('Direct email API v2', () => {
             title: 'Mixed outbox',
           },
           participant: { email: 'conversation@example.com' },
-          message: { text: 'Conversation email' },
+          message: {
+            text: 'Conversation email',
+            from: { address: 'system@example.com' },
+            replyTo: { address: TEST_CONFIG.replyToBaseAddress },
+          },
         }),
       },
     );
@@ -479,12 +484,13 @@ describe('Direct email API v2', () => {
     const direct = await send('cross-operation-key');
     expect(direct.status).toBe(201);
 
+    await allowAddress(TEST_CONFIG.replyToBaseAddress, 'REPLY_TO');
     const conversation = await fetch(
-      `${TEST_CONFIG.appBaseUrl}/api/conversations/v1`,
+      `${TEST_CONFIG.appBaseUrl}/api/conversations/v2`,
       {
         method: 'POST',
         headers: {
-          authorization: `Bearer ${TEST_CONFIG.conversationApiKey}`,
+          authorization: `Bearer ${TEST_CONFIG.emailV2ApiKey}`,
           'content-type': 'application/json',
           'idempotency-key': 'cross-operation-key',
         },
@@ -495,7 +501,11 @@ describe('Direct email API v2', () => {
             title: 'Cross operation',
           },
           participant: { email: 'person@example.com' },
-          message: { text: 'Conversation message' },
+          message: {
+            text: 'Conversation message',
+            from: { address: 'system@example.com' },
+            replyTo: { address: TEST_CONFIG.replyToBaseAddress },
+          },
         }),
       },
     );

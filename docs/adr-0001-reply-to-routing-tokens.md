@@ -72,9 +72,9 @@ Reply-To, as a fallback matcher behind RFC header threading.
 
 The routing-token decision now applies to two conversation API contracts:
 
-- **V1 is the frozen legacy contract.** The Reply-To base comes from
-  `RESEND_REPLY_TO`, and the From identity comes from `RESEND_FROM`. V1 has no
-  planned sunset.
+- **V1 was the frozen legacy contract.** The Reply-To base came from
+  `RESEND_REPLY_TO`, and the From identity came from `RESEND_FROM`. Superseded
+  by the 0.5.0 amendment below.
 - **V2 is the forward contract.** Each send or enqueue request supplies
   structured `from` and `replyTo` identities. Their addresses are canonicalized
   to lowercase and must exactly match role-specific `FROM` and `REPLY_TO` rows
@@ -87,12 +87,28 @@ outbound message for that conversation combines this fixed base with the
 existing `routingToken`; V2 cannot rotate the base by supplying a different
 allowed address. This preserves one stable routing address for replies.
 
-An authorized V2 reply can promote a V1 conversation when it supplies the same
-fixed Reply-To base. Promotion occurs when the V2 intent is successfully
-persisted, before a synchronous provider call; provider acceptance is not
-required, and a subsequent `502` does not roll promotion back. Promotion is
-one-way: subsequent V1 writes are rejected, while the V1 API itself remains
-available without a sunset for other V1 conversations.
+An authorized V2 reply can promote a `V1`-tagged conversation when it supplies
+the same fixed Reply-To base. Promotion occurs when the V2 intent is
+successfully persisted, before a synchronous provider call; provider acceptance
+is not required, and a subsequent `502` does not roll promotion back. Promotion
+is one-way: a conversation is never demoted to `V1`.
+
+### Amendment: V1 retirement (0.5.0, 2026-08-15)
+
+The V1 conversation API was removed. `/api/conversations/v1` and everything
+under it are no longer routed, and `CONVERSATION_API_KEY` and `RESEND_FROM` are
+no longer read. This does not change the routing-token decision itself.
+
+`RESEND_REPLY_TO` is retained, and its role is now narrower: it is the Reply-To
+base used to validate inbound routing tokens, not a source of outbound identity.
+Outbound identities come exclusively from allowlisted caller-supplied `from` and
+`replyTo` values.
+
+Conversations created by V1 keep `apiVersion = V1` and their fixed Reply-To
+base. They remain readable and writable through V2, and the one-way promotion
+described above still applies to them. No migration back-fills their
+`apiVersion`, because the fixed base — not the version tag — is what governs
+routing.
 
 Inbound out-of-order recovery can discover that multiple conversation rows
 represent one conversation. Reconciliation never loses one-way V2 promotion:

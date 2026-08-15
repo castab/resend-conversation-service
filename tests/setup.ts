@@ -14,8 +14,6 @@ if (!testDatabaseUrl) {
 
 export const TEST_CONFIG = {
   appBaseUrl: process.env.APP_BASE_URL || 'http://localhost:3000',
-  conversationApiKey:
-    process.env.CONVERSATION_API_KEY || 'test-conversation-api-key',
   emailV2ApiKey: resolveEmailV2ApiKey() || 'test-conversation-v2-api-key',
   outboxDrainApiKey:
     process.env.OUTBOX_DRAIN_API_KEY || 'test-outbox-drain-api-key',

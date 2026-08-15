@@ -1,1 +1,1 @@
-export { POST } from '@/routes/conversations/v1/outbox/drain/route';
+export { POST } from '@/routes/emails/v2/outbox/drain/route';
