@@ -57,7 +57,6 @@ POST  /api/conversations/v2
 GET   /api/conversations/v2?assignment=unassigned
 GET   /api/conversations/v2/summary
 POST  /api/conversations/v2/outbox
-POST  /api/conversations/v2/outbox/drain  # deprecated compatibility alias
 GET   /api/conversations/v2/{conversationId}
 PATCH /api/conversations/v2/{conversationId}
 POST  /api/conversations/v2/{conversationId}/state
@@ -372,8 +371,7 @@ Configure Resend to deliver signed events to
 
 Invoke one shared drain route at least once per minute when using asynchronous
 sends. New deployments should use
-`POST /api/emails/v2/outbox/drain`; `POST /api/conversations/v2/outbox/drain`
-remains supported as a deprecated compatibility alias. All routes use the same
+`POST /api/emails/v2/outbox/drain`, which is the only drain route. All routes use the same
 persisted outbox and drain credential, may process direct and conversation
 intent together, handle one bounded batch per request, and do not poll
 internally. Do not schedule every route for the same interval.

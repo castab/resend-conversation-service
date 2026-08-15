@@ -10,6 +10,8 @@ describe('Private conversation API', () => {
   const resendServer = new FakeResendServer();
   const database = new Client({ connectionString: TEST_CONFIG.postgresql.url });
   const baseUrl = `${TEST_CONFIG.appBaseUrl}/api/conversations/v2`;
+  // The shared drain is email-namespaced; the conversation alias was removed.
+  const drainUrl = `${TEST_CONFIG.appBaseUrl}/api/emails/v2/outbox/drain`;
   const webhookUrl = `${TEST_CONFIG.appBaseUrl}/api/webhooks/resend/v1`;
 
   beforeAll(async () => {
@@ -62,6 +64,23 @@ describe('Private conversation API', () => {
       expect(response.status).toBe(404);
       await expect(response.json()).resolves.toEqual({ error: 'Not found' });
     }
+  });
+
+  it('no longer routes the retired conversation drain alias', async () => {
+    const retired = await fetch(`${baseUrl}/outbox/drain`, {
+      method: 'POST',
+      headers: drainHeaders(),
+      body: JSON.stringify({ limit: 10 }),
+    });
+    expect(retired.status).toBe(404);
+    await expect(retired.json()).resolves.toEqual({ error: 'Not found' });
+
+    const shared = await fetch(drainUrl, {
+      method: 'POST',
+      headers: drainHeaders(),
+      body: JSON.stringify({ limit: 10 }),
+    });
+    expect(shared.status).toBe(200);
   });
 
   it('resolves the V2 API key alias with mixed-case precedence', () => {
@@ -426,7 +445,7 @@ describe('Private conversation API', () => {
     expect(queued.status).toBe(202);
 
     await database.query('TRUNCATE TABLE email_address_allowlist_entries');
-    const drained = await fetch(`${baseUrl}/outbox/drain`, {
+    const drained = await fetch(drainUrl, {
       method: 'POST',
       headers: drainHeaders(),
       body: JSON.stringify({ limit: 100 }),
@@ -817,14 +836,14 @@ describe('Private conversation API', () => {
   });
 
   it('requires the dedicated key and validates the drain limit', async () => {
-    const unauthorized = await fetch(`${baseUrl}/outbox/drain`, {
+    const unauthorized = await fetch(drainUrl, {
       method: 'POST',
       headers: headers(),
       body: JSON.stringify({ limit: 100 }),
     });
     expect(unauthorized.status).toBe(401);
 
-    const invalid = await fetch(`${baseUrl}/outbox/drain`, {
+    const invalid = await fetch(drainUrl, {
       method: 'POST',
       headers: drainHeaders(),
       body: JSON.stringify({ limit: 101 }),
@@ -1531,7 +1550,7 @@ describe('Private conversation API', () => {
   }
 
   async function drainOutbox(limit: number) {
-    const response = await fetch(`${baseUrl}/outbox/drain`, {
+    const response = await fetch(drainUrl, {
       method: 'POST',
       headers: drainHeaders(),
       body: JSON.stringify({ limit }),

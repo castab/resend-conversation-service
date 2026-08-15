@@ -16,7 +16,6 @@ import {
   PATCH as patchConversationV2,
 } from '@/routes/conversations/v2/[conversationId]/route';
 import { POST as setConversationStateV2 } from '@/routes/conversations/v2/[conversationId]/state/route';
-import { POST as drainOutboxV2 } from '@/routes/conversations/v2/outbox/drain/route';
 import { POST as enqueueConversationV2 } from '@/routes/conversations/v2/outbox/route';
 import {
   POST as createConversationV2,
@@ -146,12 +145,6 @@ export function createApp() {
   );
 
   // Static conversation routes must precede /:conversationId routes.
-  app.post(
-    '/api/conversations/v2/outbox/drain',
-    requireDrainAuth,
-    rawBody,
-    adapt(drainOutboxV2),
-  );
   app.post(
     '/api/conversations/v2/outbox',
     requireEmailV2Auth,

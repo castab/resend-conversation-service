@@ -534,7 +534,7 @@
       "post": {
         "operationId": "drainEmailOutboxV2",
         "summary": "Deliver one shared outbox batch",
-        "description": "Email-namespaced alias for the shared outbox drain. It uses only OUTBOX_DRAIN_API_KEY and may deliver direct, V1 conversation, and V2 conversation messages in one fixed ordered batch. Operators should schedule one drain alias rather than invoke every alias.",
+        "description": "Delivers one bounded, ordered batch from the shared transactional outbox. It uses only OUTBOX_DRAIN_API_KEY and may deliver direct and conversation messages in one fixed ordered batch. This is the only drain route; schedule it at least once per minute when using queued sends. A batch that fails or is indeterminate is retried on a later invocation with the same provider idempotency key inside the safety window.",
         "tags": ["Outbox"],
         "security": [
           {
@@ -928,60 +928,6 @@
         }
       }
     },
-    "/api/conversations/v2/outbox/drain": {
-      "post": {
-        "operationId": "drainConversationOutboxV2",
-        "deprecated": true,
-        "summary": "Deliver one shared outbox batch using a deprecated alias",
-        "description": "Deprecated compatibility alias for POST /api/emails/v2/outbox/drain with no announced sunset. It uses only the dedicated drain credential and retains identical shared behavior, including delivery of direct, V1 conversation, and V2 conversation messages from the same persisted outbox. New scheduler integrations must use the email-namespaced route.",
-        "tags": ["Outbox"],
-        "security": [
-          {
-            "outboxDrainAuth": []
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DrainOutboxRequest"
-              },
-              "example": {
-                "limit": 100
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "The bounded drain invocation completed, including persisted retry scheduling when applicable.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DrainOutboxResult"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "413": {
-            "$ref": "#/components/responses/PayloadTooLarge"
-          },
-          "415": {
-            "$ref": "#/components/responses/UnsupportedContentEncoding"
-          },
-          "500": {
-            "$ref": "#/components/responses/ServerError"
-          }
-        }
-      }
-    },
     "/api/conversations/v2/{conversationId}": {
       "parameters": [
         {
@@ -1151,7 +1097,7 @@
       "post": {
         "operationId": "createConversationMessageV2",
         "summary": "Continue a conversation with explicit identities",
-        "description": "Sends a reply using required from and replyTo identities. Optional to recipients override the outbound recipient list but do not change the single conversation participant; when omitted, the reply is sent to participant. Optional tags are forwarded to Resend. Exact role-specific allowlist rows are checked before conversation lookup. The requested Reply-To base must equal the conversation's persisted base once set. Persisting the V2 reply intent atomically promotes a V1 conversation to V2 and makes future V1 reply and enqueue writes return 409. Promotion does not require provider acceptance and remains committed if the subsequent synchronous provider call returns 502. Parent selection and RFC threading match V1.",
+        "description": "Sends a reply using required from and replyTo identities. Optional to recipients override the outbound recipient list but do not change the single conversation participant; when omitted, the reply is sent to participant. Optional tags are forwarded to Resend. Exact role-specific allowlist rows are checked before conversation lookup. The requested Reply-To base must equal the conversation's persisted base once set. Persisting the V2 reply intent atomically promotes a V1 conversation to V2. Promotion does not require provider acceptance and remains committed if the subsequent synchronous provider call returns 502. An explicit reply parent must belong to the conversation; otherwise the latest accepted or received message is used, and References is built from that parent's ancestry.",
         "tags": ["Messages"],
         "security": [
           {
@@ -1446,7 +1392,7 @@
       "emailV2Auth": {
         "type": "http",
         "scheme": "bearer",
-        "description": "Current V2 credential supplied from EMAIL_v2_API_KEY or the EMAIL_V2_API_KEY fallback. EMAIL_v2_API_KEY takes precedence when both are nonempty. It authorizes conversation V2 operations and direct email; it is not interchangeable with the V1 or outbox-drain credential."
+        "description": "Current V2 credential supplied from EMAIL_v2_API_KEY or the EMAIL_V2_API_KEY fallback. EMAIL_v2_API_KEY takes precedence when both are nonempty. It authorizes conversation V2 operations and direct email; it is not interchangeable with the outbox-drain credential."
       },
       "outboxDrainAuth": {
         "type": "http",
@@ -2010,7 +1956,7 @@
           "replyTo": {
             "type": ["string", "null"],
             "format": "email",
-            "description": "For outbound messages, the stable conversation routing address generated by appending +c_<32 lowercase hex token> to the persisted base. V1 obtains the base from RESEND_REPLY_TO; V2 obtains and fixes it from the first authorized caller-supplied replyTo.address. For inbound messages, this is the sender-provided Reply-To address when present."
+            "description": "For outbound messages, the stable conversation routing address generated by appending +c_<32 lowercase hex token> to the persisted base. V2 obtains and fixes it from the first authorized caller-supplied replyTo.address. For inbound messages, this is the sender-provided Reply-To address when present."
           },
           "replyToName": {
             "type": ["string", "null"],

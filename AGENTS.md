@@ -34,8 +34,8 @@
   structured caller-supplied `from` and `replyTo` identities on every
   conversation send or enqueue operation.
 - Require the dedicated drain credential on the outbox drain operation.
-- Keep `POST /api/conversations/v2/outbox/drain` as a deprecated compatibility
-  alias. New scheduler integrations use `POST /api/emails/v2/outbox/drain`.
+- Keep `POST /api/emails/v2/outbox/drain` as the single drain route. Do not
+  reintroduce a conversation-namespaced drain alias.
 - Require `Idempotency-Key` on every operation that can send or enqueue email.
 - Persist send intent before calling Resend and never add unbounded retries.
 - In V2, authorize canonical lowercase addresses by exact `(address, role)`

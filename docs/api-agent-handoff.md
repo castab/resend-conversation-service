@@ -74,7 +74,6 @@ The complete route layout:
 | `POST`, `GET` | `/api/conversations/v2` | Create/send; list unassigned with `assignment=unassigned` |
 | `GET` | `/api/conversations/v2/summary` | Counts per conversation state plus a filterable page of conversation metadata |
 | `POST` | `/api/conversations/v2/outbox` | Enqueue opening message; pending idempotent replay also returns `202` |
-| `POST` | `/api/conversations/v2/outbox/drain` | Deprecated compatibility alias for the shared drain |
 | `GET`, `PATCH` | `/api/conversations/v2/{conversationId}` | Read; assign an unassigned null-version or already-V2 conversation |
 | `POST` | `/api/conversations/v2/{conversationId}/state` | Set conversation state by hand; no `Idempotency-Key` |
 | `POST` | `/api/conversations/v2/{conversationId}/messages` | Send reply |
@@ -134,7 +133,7 @@ Conversations created before the V1 retirement are still stored with `apiVersion
 5. Persist one idempotency key per logical send or enqueue and reuse it on retries.
 6. Handle `200`, `201`, and `202` as state-bearing success responses.
 7. Reconcile queued direct state by replaying the enqueue operation with the same key and normalized request; do not create a replacement send with a new key.
-8. Schedule exactly one shared drain route with the dedicated credential. Use `/api/emails/v2/outbox/drain`; `/api/conversations/v2/outbox/drain` is a deprecated compatibility alias.
+8. Schedule the shared drain with the dedicated credential at `/api/emails/v2/outbox/drain`. It is the only drain route.
 9. Sanitize response HTML.
 10. Validate request and response models against upstream OpenAPI contract `0.5.0`.
 

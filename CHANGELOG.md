@@ -45,6 +45,16 @@ Versioning.
   validation.
 - Removed the `bearerAuth` security scheme from `public/openapi.json`.
   `emailV2Auth` is now the spec-wide default.
+- **Breaking.** Removed `POST /api/conversations/v2/outbox/drain`, the
+  compatibility alias deprecated in 0.4.0. `POST /api/emails/v2/outbox/drain` is
+  now the only drain route. Behavior, request and response shapes, and the
+  `OUTBOX_DRAIN_API_KEY` credential are unchanged.
+
+  **Operators must repoint the scheduled drain caller before deploying.** A
+  scheduler still calling the conversation-namespaced path receives `404`, and
+  because nothing else reports a drain failure, queued email accumulates in the
+  outbox instead of surfacing an error. Deployments provisioned before 0.4.0 are
+  the most likely to still be on the old path.
 
 `GET /api/health/v1` and `POST /api/webhooks/resend/v1` are unrelated to this
 retirement and are unchanged.
@@ -53,9 +63,7 @@ retirement and are unchanged.
 
 - Moved the shared outbox drain implementation to
   `POST /api/emails/v2/outbox/drain`, which previously re-exported it from the
-  V1 route tree. `POST /api/conversations/v2/outbox/drain` remains a deprecated
-  compatibility alias with no announced sunset, and drain behavior and its
-  credential are unchanged.
+  V1 route tree.
 
 ### Migration
 

@@ -95,7 +95,6 @@ Required V2 route inventory:
 - `POST /api/conversations/v2`
 - `GET /api/conversations/v2?assignment=unassigned`
 - `POST /api/conversations/v2/outbox`
-- `POST /api/conversations/v2/outbox/drain`
 - `GET /api/conversations/v2/{conversationId}`
 - `PATCH /api/conversations/v2/{conversationId}`
 - `POST /api/conversations/v2/{conversationId}/messages`
