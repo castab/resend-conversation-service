@@ -120,3 +120,6 @@
 - Integration tests require a dedicated disposable `TEST_DATABASE_URL` and
   truncate application tables.
 - Keep test files serial while they share PostgreSQL and the fake Resend server.
+- Describe pull requests with the sections in
+  [.github/pull_request_template.md](.github/pull_request_template.md), dropping
+  the ones that do not apply.

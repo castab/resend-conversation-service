@@ -33,6 +33,7 @@ check, OpenAPI contract, Docker image, and Railway service configuration.
 ## Repository Layout
 
 ```text
+.github/                # CI workflows and the pull request template
 prisma/                 # Prisma schema and immutable migration history
 public/openapi.json     # Unified OpenAPI contract
 src/routes/                # Express routes and Swagger UI
