@@ -1,3 +1,4 @@
+export * from './conversation-state';
 export * from './conversations';
 export * from './delivery';
 export * from './resend-client';

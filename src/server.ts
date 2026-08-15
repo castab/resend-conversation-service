@@ -28,12 +28,14 @@ import {
   GET as getConversationV2,
   PATCH as patchConversationV2,
 } from '@/routes/conversations/v2/[conversationId]/route';
+import { POST as setConversationStateV2 } from '@/routes/conversations/v2/[conversationId]/state/route';
 import { POST as drainOutboxV2 } from '@/routes/conversations/v2/outbox/drain/route';
 import { POST as enqueueConversationV2 } from '@/routes/conversations/v2/outbox/route';
 import {
   POST as createConversationV2,
   GET as listConversationsV2,
 } from '@/routes/conversations/v2/route';
+import { GET as getConversationSummaryV2 } from '@/routes/conversations/v2/summary/route';
 import { GET as getConversationByTopicV2 } from '@/routes/conversations/v2/topics/[topicType]/[externalTopicId]/route';
 import { POST as drainEmailOutboxV2 } from '@/routes/emails/v2/outbox/drain/route';
 import { POST as enqueueDirectEmailV2 } from '@/routes/emails/v2/outbox/route';
@@ -189,6 +191,11 @@ export function createApp() {
     (_request, response) => response.status(404).json({ error: 'Not found' }),
   );
   app.get(
+    '/api/conversations/v2/summary',
+    requireEmailV2Auth,
+    adapt(getConversationSummaryV2),
+  );
+  app.get(
     '/api/conversations/v2/topics/:topicType/:externalTopicId',
     requireEmailV2Auth,
     adapt(getConversationByTopicV2),
@@ -215,6 +222,12 @@ export function createApp() {
     requireIdempotency,
     rawBody,
     adapt(sendMessageV2),
+  );
+  app.post(
+    '/api/conversations/v2/:conversationId/state',
+    requireEmailV2Auth,
+    rawBody,
+    adapt(setConversationStateV2),
   );
   app
     .route('/api/conversations/v2/:conversationId')

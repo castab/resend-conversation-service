@@ -54,6 +54,14 @@
   conversation's Reply-To base.
 - Permit one-way V1-to-V2 promotion through an authorized V2 write. Reject
   subsequent V1 writes to that conversation; do not demote it to V1.
+- Maintain conversation state from mail flow: inbound projection sets
+  `AWAITING_US`, persisted outbound reply intent sets `AWAITING_PARTICIPANT`, and
+  a bounced, complained, or suppressed outbound delivery sets `TERMINATED`. Only
+  stamp `state_changed_at` when the state value actually changes.
+- Keep `TERMINATED` sticky against automatic transitions and keep the state
+  endpoint the only way out of it. Inbound mail reopens `CONCLUDED`.
+- Keep conversation state transitions version-agnostic. Only the summary and
+  state routes are V2-only.
 - An explicit reply parent must belong to the conversation. Otherwise use the
   latest accepted or received message.
 - Never send a reply without a parent RFC Message-ID.

@@ -64,10 +64,12 @@ POST  /api/conversations/v1/{conversationId}/messages/outbox
 GET   /api/conversations/v1/topics/{topicType}/{externalTopicId}
 POST  /api/conversations/v2
 GET   /api/conversations/v2?assignment=unassigned
+GET   /api/conversations/v2/summary
 POST  /api/conversations/v2/outbox
 POST  /api/conversations/v2/outbox/drain  # deprecated compatibility alias
 GET   /api/conversations/v2/{conversationId}
 PATCH /api/conversations/v2/{conversationId}
+POST  /api/conversations/v2/{conversationId}/state
 POST  /api/conversations/v2/{conversationId}/messages
 POST  /api/conversations/v2/{conversationId}/messages/outbox
 GET   /api/conversations/v2/topics/{topicType}/{externalTopicId}
@@ -147,6 +149,30 @@ Outbound `accepted` state means Resend accepted the send API request. A message
 is only marked delivered after a matching `email.delivered` webhook is projected.
 Opened and clicked events are ingested into the webhook ledger when enabled in
 Resend, but they do not change delivery status.
+
+### Conversation state
+
+Each conversation records whose turn it is as `awaiting_us`,
+`awaiting_participant`, `concluded`, or `terminated`, alongside `stateChangedAt`
+and a derived `awaitingReply` boolean. Inbound mail sets `awaiting_us`; persisting
+outbound reply intent, whether sent synchronously or enqueued, sets
+`awaiting_participant`; a bounce, complaint, or suppression on an outbound
+conversation message sets `terminated`. A send-side `email.failed` says nothing
+about the participant and is not terminal.
+
+`stateChangedAt` only moves when the state itself changes, so a conversation
+waiting on us keeps the timestamp of the message that started the wait. Automatic
+transitions never move a `terminated` conversation, while inbound mail reopens a
+`concluded` one.
+
+`GET /api/conversations/v2/summary` returns counts for every state plus a
+filterable page of conversation metadata, oldest state change first, which makes
+`?state=awaiting_us` a reply queue. It carries no message payload; read messages
+from the conversation endpoint. `POST /api/conversations/v2/{conversationId}/state`
+is the operator override, most often used to mark a conversation `concluded` when
+a message such as a bare acknowledgement needs no follow-up. Every transition is
+permitted and repeating one is a successful no-op. State transitions apply to V1
+and V2 conversations alike; only these two routes are V2-only.
 
 Direct email intent uses the same durable message and provider-idempotency
 state machine, but has no conversation relationship. Direct responses expose

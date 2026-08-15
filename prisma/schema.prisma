@@ -45,6 +45,13 @@ enum EmailAddressRole {
   REPLY_TO
 }
 
+enum ConversationState {
+  AWAITING_US
+  AWAITING_PARTICIPANT
+  CONCLUDED
+  TERMINATED
+}
+
 model EmailConversation {
   id                       String           @id @default(dbgenerated("uuidv7()")) @db.Uuid
   routingToken             String           @unique(map: "email_conversations_routing_token_key") @default(dbgenerated("gen_random_uuid()")) @map("routing_token") @db.Uuid
@@ -57,6 +64,8 @@ model EmailConversation {
   participantName          String?          @map("participant_name")
   replyToBaseAddress       String?          @map("reply_to_base_address") @db.VarChar(320)
   replyToRequiresAllowlist Boolean          @default(false) @map("reply_to_requires_allowlist")
+  state                    ConversationState @default(AWAITING_PARTICIPANT)
+  stateChangedAt           DateTime         @default(now()) @map("state_changed_at") @db.Timestamptz(6)
   lastMessageAt            DateTime         @map("last_message_at") @db.Timestamptz(6)
   createdAt                DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -65,6 +74,7 @@ model EmailConversation {
 
   @@unique([topicType, externalTopicId], map: "email_conversations_topic_key")
   @@index([lastMessageAt], map: "idx_email_conversations_last_message_at")
+  @@index([state, stateChangedAt, id], map: "idx_email_conversations_state")
   @@map("email_conversations")
 }
 

@@ -292,6 +292,8 @@ async function reopenFailedTopicConversation(
         participantName: input.value.participant.name,
         replyToBaseAddress,
         replyToRequiresAllowlist: false,
+        state: 'AWAITING_PARTICIPANT',
+        stateChangedAt: now,
         lastMessageAt: now,
       },
     });

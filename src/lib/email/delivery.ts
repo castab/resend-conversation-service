@@ -1,4 +1,5 @@
 import type { Prisma, PrismaClient } from '@/lib/database';
+import { markConversationTerminated } from './conversation-state';
 import type { EmailWebhookEvent } from './webhook';
 
 export const DELIVERY_EVENT_TYPES = [
@@ -37,8 +38,20 @@ const DELIVERY_STATE_BY_EVENT_TYPE: Record<DeliveryEventType, DeliveryState> = {
   'email.failed': 'FAILED',
 };
 
+// States that prove the participant cannot be reached. `FAILED` is a send-side
+// problem rather than a statement about the participant, so it is excluded.
+const UNREACHABLE_DELIVERY_STATES: readonly DeliveryState[] = [
+  'BOUNCED',
+  'COMPLAINED',
+  'SUPPRESSED',
+];
+
 export function isDeliveryEventType(type: string): type is DeliveryEventType {
   return (DELIVERY_EVENT_TYPES as readonly string[]).includes(type);
+}
+
+function isUnreachableState(state: DeliveryState): boolean {
+  return UNREACHABLE_DELIVERY_STATES.includes(state);
 }
 
 export function getDeliveryDetail(event: EmailWebhookEvent): string | null {
@@ -94,6 +107,26 @@ export async function projectOutboundDeliveryStateForResendEmail(
       deliveredAt: projected.deliveredAt,
     },
   });
+
+  if (!isUnreachableState(projected.current.state)) {
+    return;
+  }
+  // Direct email carries no conversation, so the filter doubles as the kind check.
+  const message = await client.emailMessage.findFirst({
+    where: {
+      direction: 'OUTBOUND',
+      resendEmailId,
+      conversationId: { not: null },
+    },
+    select: { conversationId: true },
+  });
+  if (message?.conversationId) {
+    await markConversationTerminated(
+      client,
+      message.conversationId,
+      projected.current.eventCreatedAt,
+    );
+  }
 }
 
 export async function reconcileOutboundDeliveryState(
