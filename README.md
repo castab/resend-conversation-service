@@ -348,6 +348,7 @@ currently limited to `linux/amd64` images.
 
 ## Releases
 
+- This project follows [Semantic Versioning 2.0.0](https://semver.org/).
 - Repository metadata, OpenAPI metadata, and consumer documentation use the
   same SemVer value.
 - `CHANGELOG.md` is the source of release notes.
@@ -355,7 +356,8 @@ currently limited to `linux/amd64` images.
 - After the release PR merges to `main`, push the matching annotated `vX.Y.Z`
   tag to publish Docker images.
 
-Detailed release steps live in `docs/releasing.md`.
+Detailed release steps and the versioning policy live in
+[docs/releasing.md](docs/releasing.md).
 
 ## Railway
 

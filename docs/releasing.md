@@ -2,12 +2,33 @@
 
 ## Versioning policy
 
+This project follows [Semantic Versioning 2.0.0](https://semver.org/). Treat the
+specification as the governing guideline; the rules below record how it is
+applied here and do not override it.
+
 - Git tags use stable Semantic Versioning with a `v` prefix, such as `v0.0.1`.
 - Repository metadata uses the same version without the `v` prefix.
 - Until `1.0.0`, treat `0.x.0` releases as the place for contract or behavior
-  changes that may require consumer updates.
+  changes that may require consumer updates. SemVer treats major version zero as
+  initial development whose public API should not be considered stable, so a
+  breaking change does not force a major bump while the version stays below
+  `1.0.0`.
 - `x.y.z` tags are immutable release identifiers. Docker aliases such as `x.y`,
   `x`, and `latest` move forward with each stable release.
+
+### Reaching `1.0.0`
+
+Publishing `1.0.0` declares the public API stable and, under SemVer, commits
+every later backwards-incompatible change to a major bump. Do not bump to
+`1.0.0` merely because a release removes a legacy surface. Two things should be
+true first:
+
+- `public/openapi.json` matches runtime behavior. The "Compatibility and known
+  gaps" section of [api-consumer-guide.md](api-consumer-guide.md) currently
+  records places where they diverge.
+- A written deprecation policy exists, so the major-version promise has
+  something behind it. There is none today, and releases through `0.5.0` have
+  removed surfaces that were documented as having no announced sunset.
 
 ## Files that must stay aligned
 

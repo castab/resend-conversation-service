@@ -2,8 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
-The format is based on Keep a Changelog, and this project uses Semantic
-Versioning.
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project uses [Semantic Versioning](https://semver.org/). See
+[docs/releasing.md](docs/releasing.md) for how versions are chosen.
 
 ## [Unreleased]
 
@@ -64,6 +65,11 @@ retirement and are unchanged.
 - Moved the shared outbox drain implementation to
   `POST /api/emails/v2/outbox/drain`, which previously re-exported it from the
   V1 route tree.
+- Documented [Semantic Versioning 2.0.0](https://semver.org/) as the governing
+  versioning guideline, with links from `README.md`, `CHANGELOG.md`, and
+  `docs/releasing.md`. `docs/releasing.md` now explains why pre-`1.0.0`
+  breaking changes stay in `0.x.0` and records what should be true before
+  publishing `1.0.0`.
 
 ### Migration
 
