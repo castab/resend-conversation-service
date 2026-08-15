@@ -66,8 +66,8 @@ Inspect these first:
 
 ### 1. Build an evidence matrix
 
-Build separate V1 and V2 evidence matrices, plus shared-route evidence. For each
-registered route, capture:
+Build V2 and shared-route evidence matrices. For each registered route,
+capture:
 
 - Method and path
 - Authentication requirements
@@ -116,7 +116,7 @@ Update `public/openapi.json` so it matches supported behavior.
 
 Include:
 
-- All supported shared, V1, and V2 API operations above
+- All supported shared and V2 API operations above
 - Security requirements
 - Relevant header parameters
 - Request and response schemas
