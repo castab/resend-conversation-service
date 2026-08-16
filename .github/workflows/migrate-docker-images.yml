@@ -44,6 +44,6 @@ jobs:
           crane ls "$SOURCE_IMAGE" > source-tags.txt
           test -s source-tags.txt
           while IFS= read -r tag; do
-            crane copy --all "$SOURCE_IMAGE:$tag" "$TARGET_IMAGE:$tag"
+            crane copy "$SOURCE_IMAGE:$tag" "$TARGET_IMAGE:$tag"
             test "$(crane digest "$SOURCE_IMAGE:$tag")" = "$(crane digest "$TARGET_IMAGE:$tag")"
           done < source-tags.txt
