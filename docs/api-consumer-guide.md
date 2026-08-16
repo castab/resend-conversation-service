@@ -4,7 +4,7 @@ Contract version: `0.4.0`
 
 ## Service purpose
 
-`resend-service` owns topic-centered email conversations for one external participant per conversation and supports synchronous and queued direct email that is not attached to a conversation. It persists outbound send intent before contacting Resend, projects inbound and delivery webhooks, and preserves parent relationships plus RFC `Message-ID` ancestry for conversations.
+`resend-conversation-service` owns topic-centered email conversations for one external participant per conversation and supports synchronous and queued direct email that is not attached to a conversation. It persists outbound send intent before contacting Resend, projects inbound and delivery webhooks, and preserves parent relationships plus RFC `Message-ID` ancestry for conversations.
 
 The service is authoritative for:
 
@@ -454,7 +454,7 @@ Direct email:
 
 ```bash
 curl -i \
-  -X POST https://resend-service.example/api/emails/v2 \
+  -X POST https://resend-conversation-service.example/api/emails/v2 \
   -H "Authorization: Bearer <EMAIL_v2_API_KEY>" \
   -H "Idempotency-Key: verification-user-4821" \
   -H "Content-Type: application/json" \
@@ -470,7 +470,7 @@ Conversation opening:
 
 ```bash
 curl -i \
-  -X POST https://resend-service.example/api/conversations/v2 \
+  -X POST https://resend-conversation-service.example/api/conversations/v2 \
   -H "Authorization: Bearer <EMAIL_v2_API_KEY>" \
   -H "Idempotency-Key: booking-4821-opening" \
   -H "Content-Type: application/json" \

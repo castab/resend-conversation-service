@@ -70,13 +70,31 @@ Run `npm run release:validate` before opening or merging a release PR.
 6. The tag-triggered publish workflow builds and pushes these Docker tags to
    Docker Hub for stable releases:
 
-   - `castab/resend-service:x.y.z`
-   - `castab/resend-service:x.y`
-   - `castab/resend-service:x`
-   - `castab/resend-service:latest`
+    - `castab/resend-conversation-service:x.y.z`
+    - `castab/resend-conversation-service:x.y`
+    - `castab/resend-conversation-service:x`
+    - `castab/resend-conversation-service:latest`
 
 7. After Docker publication succeeds, create a GitHub Release from the matching
    `CHANGELOG.md` section and include the published image digest.
+
+## Docker repository migration
+
+`castab/resend-service` is the frozen legacy Docker Hub repository. Its tags
+through `0.5.0` must be copied to `castab/resend-conversation-service` before
+the next release. Do not delete or transfer the legacy repository: Docker
+clients do not follow repository renames.
+
+1. Create `castab/resend-conversation-service` in Docker Hub and ensure the
+   existing `DOCKERHUB_TOKEN` can push to it.
+2. Manually run the `Migrate Docker Hub Images` workflow with the confirmation
+   value `COPY-HISTORICAL-IMAGES`. It copies every tag from the legacy repository
+   without rebuilding and fails if any target manifest digest differs.
+3. Confirm the copied tags in Docker Hub, then enable immutable exact-version
+   tags in the new repository. Keep `x.y`, `x`, and `latest` mutable.
+4. Delete `.github/workflows/migrate-docker-images.yml` in a follow-up pull
+   request. Future releases publish only to
+   `castab/resend-conversation-service`.
 
 ## Required repository settings
 

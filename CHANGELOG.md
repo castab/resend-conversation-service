@@ -8,6 +8,13 @@ and this project uses [Semantic Versioning](https://semver.org/). See
 
 ## [Unreleased]
 
+### Changed
+
+- Renamed the project and canonical Docker Hub image from `resend-service` to
+  `resend-conversation-service`. Historical Docker tags through `0.5.0` remain
+  available under the legacy image name; future releases publish only to
+  `castab/resend-conversation-service`.
+
 ## [0.5.0] - 2026-08-15
 
 ### Added

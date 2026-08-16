@@ -58,7 +58,7 @@ export function createResendEmailClient({
       headers: {
         authorization: `Bearer ${apiKey}`,
         'content-type': 'application/json',
-        'user-agent': 'resend-service/2.0',
+        'user-agent': 'resend-conversation-service/2.0',
         ...init?.headers,
       },
       signal: AbortSignal.timeout(15_000),
