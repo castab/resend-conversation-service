@@ -214,7 +214,7 @@ export function createApp() {
   app.get('/docs', (_request, response) =>
     response.type('html').send(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>API documentation | resend-service</title><link rel="stylesheet" href="/docs/assets/swagger-ui.css"></head>
+<title>API documentation | resend-conversation-service</title><link rel="stylesheet" href="/docs/assets/swagger-ui.css"></head>
 <body><div id="swagger-ui"></div><script src="/docs/assets/swagger-ui-bundle.js"></script>
 <script>SwaggerUIBundle({url:'/openapi.json',dom_id:'#swagger-ui',deepLinking:true});</script></body></html>`),
   );
@@ -264,7 +264,7 @@ if (process.env.NODE_ENV !== 'test') {
   const port = Number(process.env.PORT ?? 3000);
   const host = process.env.HOST ?? process.env.HOSTNAME ?? '0.0.0.0';
   const server = createServer(createApp()).listen(port, host, () =>
-    console.info(`resend-service listening on ${host}:${port}`),
+    console.info(`resend-conversation-service listening on ${host}:${port}`),
   );
   let closing = false;
   const shutdown = () => {

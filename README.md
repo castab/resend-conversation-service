@@ -1,8 +1,8 @@
-# resend-service
+# resend-conversation-service
 
-[![Docker Hub](https://img.shields.io/docker/pulls/castab/resend-service?label=Docker%20Hub)](https://hub.docker.com/r/castab/resend-service) [![Docker Image Version](https://img.shields.io/docker/v/castab/resend-service?sort=semver&label=version)](https://hub.docker.com/r/castab/resend-service/tags)
+[![Docker Hub](https://img.shields.io/docker/pulls/castab/resend-conversation-service?label=Docker%20Hub)](https://hub.docker.com/r/castab/resend-conversation-service) [![Docker Image Version](https://img.shields.io/docker/v/castab/resend-conversation-service?sort=semver&label=version)](https://hub.docker.com/r/castab/resend-conversation-service/tags)
 
-`resend-service` is one PostgreSQL-backed Express application for receiving
+`resend-conversation-service` is one PostgreSQL-backed Express application for receiving
 Resend webhooks, managing topic-centered email conversations, and sending
 direct non-conversation email. An external
 API gateway controls which paths are publicly reachable; authentication and
@@ -316,9 +316,9 @@ fall back to an application or production database for destructive cleanup.
 ## Docker
 
 ```bash
-docker build -t resend-service .
-docker run --rm -e DATABASE_URL="$DATABASE_URL" resend-service npm run db:migrate:deploy
-docker run --rm -p 3000:3000 --env-file .env resend-service
+docker build -t resend-conversation-service .
+docker run --rm -e DATABASE_URL="$DATABASE_URL" resend-conversation-service npm run db:migrate:deploy
+docker run --rm -p 3000:3000 --env-file .env resend-conversation-service
 ```
 
 The image contains Prisma migration tooling, schema, migrations, public assets,
@@ -328,13 +328,19 @@ environment variables are missing or if `RESEND_REPLY_TO` is not a valid
 untagged base mailbox address.
 
 Published releases are also available on Docker Hub as
-`castab/resend-service`.
+`castab/resend-conversation-service`.
 
 ```bash
-docker pull castab/resend-service:0.4.0
-docker run --rm -e DATABASE_URL="$DATABASE_URL" castab/resend-service:0.4.0 npm run db:migrate:deploy
-docker run --rm -p 3000:3000 --env-file .env castab/resend-service:0.4.0
+docker pull castab/resend-conversation-service:0.5.0
+docker run --rm -e DATABASE_URL="$DATABASE_URL" castab/resend-conversation-service:0.5.0 npm run db:migrate:deploy
+docker run --rm -p 3000:3000 --env-file .env castab/resend-conversation-service:0.5.0
 ```
+
+Historical tags through `0.5.0` are available under both image names after the
+one-time registry migration. Releases beginning with the next version publish
+only to `castab/resend-conversation-service`. The legacy
+`castab/resend-service` repository remains available with its final tags for
+existing deployments, but receives no new releases.
 
 Stable releases publish one immutable exact tag, plus moving convenience tags:
 

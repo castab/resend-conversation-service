@@ -91,14 +91,14 @@ jobs:
           TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/resend_test
 
       - name: Build production image
-        run: docker build -t resend-service:test .
+        run: docker build -t resend-conversation-service:test .
 
       - name: Smoke test production image
         run: |
           docker run --rm --network host \
             -e DATABASE_URL=postgres://postgres:postgres@localhost:5432/resend_test \
-            resend-service:test npm run db:migrate:deploy
-          docker run -d --name resend-service-smoke --network host \
+            resend-conversation-service:test npm run db:migrate:deploy
+          docker run -d --name resend-conversation-service-smoke --network host \
             -e PORT=3100 \
             -e DATABASE_URL=postgres://postgres:postgres@localhost:5432/resend_test \
             -e RESEND_API_KEY=test-resend-api-key \
@@ -106,13 +106,13 @@ jobs:
             -e RESEND_REPLY_TO=mailbox@replies.example.com \
             -e EMAIL_V2_API_KEY=test-conversation-v2-api-key \
             -e OUTBOX_DRAIN_API_KEY=test-outbox-drain-api-key \
-            resend-service:test
+            resend-conversation-service:test
           for i in {1..30}; do
             curl --fail --silent http://localhost:3100/api/health/v1 && break
             sleep 1
           done
-          curl --fail --silent http://localhost:3100/api/health/v1 > /dev/null || (docker logs resend-service-smoke && exit 1)
+          curl --fail --silent http://localhost:3100/api/health/v1 > /dev/null || (docker logs resend-conversation-service-smoke && exit 1)
           curl --fail --silent http://localhost:3100/openapi.json > /dev/null
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://localhost:3100/api/conversations/v2?assignment=unassigned)" = "401"
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://localhost:3100/api/conversations/v1?assignment=unassigned)" = "404"
-          docker rm -f resend-service-smoke
+          docker rm -f resend-conversation-service-smoke

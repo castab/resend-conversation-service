@@ -5,7 +5,7 @@ description: OpenAPI, api-consumer-guide.md, api-agent-handoff.md, contract extr
 
 # API Integration Package
 
-Use this skill only for `resend-service` when the task is to research and update the consumer-facing API package:
+Use this skill only for `resend-conversation-service` when the task is to research and update the consumer-facing API package:
 
 - `public/openapi.json`
 - `docs/api-consumer-guide.md`
