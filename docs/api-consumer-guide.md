@@ -1,6 +1,6 @@
 # API Consumer Guide
 
-Contract version: `0.4.0`
+Contract version: `0.6.0`
 
 ## Service purpose
 
@@ -24,11 +24,10 @@ Conversation API V2 is the only conversation contract. It is available under `/a
 
 Conversation API V1 was retired in 0.5.0. `/api/conversations/v1` and everything under it are no longer routed and return `404 {"error":"Not found"}`. Conversations it created are unaffected and continue to be served by V2.
 
-The health route is available at both `/api/health/v2` and `/api/health/v1`.
-`/api/health/v2` is the current path; `/api/health/v1` remains as a
-compatibility alias for existing readiness checks. Resend webhook ingress
-remains `/api/webhooks/resend/v1`. Neither `v1` path is affected by the
-conversation V1 retirement.
+The unauthenticated health route is `/api/health/v2`. `/api/health/v1` was
+removed in 0.6.0 and returns `404 {"error":"Not found"}`. Resend webhook
+ingress remains `/api/webhooks/resend/v1`; its V1 path is unrelated to the
+conversation API retirement.
 
 ## Authentication
 
@@ -332,7 +331,8 @@ Conversation API V1 was removed in 0.5.0. These paths are no longer routed and r
 | `POST` | `/api/conversations/v1/{conversationId}/messages/outbox` |
 | `GET` | `/api/conversations/v1/topics/{topicType}/{externalTopicId}` |
 
-`CONVERSATION_API_KEY` and `RESEND_FROM` are no longer read. `GET /api/health/v1` and `POST /api/webhooks/resend/v1` are unrelated to this retirement and remain available.
+`CONVERSATION_API_KEY` and `RESEND_FROM` are no longer read. `GET /api/health/v1`
+was later removed in 0.6.0; `POST /api/webhooks/resend/v1` remains available.
 
 To migrate, move each call to the corresponding `/api/conversations/v2` path, swap the credential for `EMAIL_v2_API_KEY`, add structured `from` and `replyTo` identities to every send and enqueue request, and replace `replyToName` with `replyTo.name`. Both addresses must hold exact role-specific allowlist rows.
 
@@ -489,7 +489,7 @@ curl -i \
 
 - Current conversation API: V2. Conversation API V1 was retired in 0.5.0 and its paths return `404`.
 - OpenAPI version: `3.1.1`.
-- Contract/package version observed in repository: `0.5.0`.
+- Contract/package version observed in repository: `0.6.0`.
 - No browser-safe authentication or correlation/request ID is defined.
 - Gateway exposure policy is deployment-owned and not included in this contract.
 - Topic lookup does not enforce the documented 255-character `externalTopicId` limit although create and assignment do; consumers must follow the stricter contract.

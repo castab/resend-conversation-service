@@ -8,9 +8,9 @@
 - Keep Prisma access and generated-client exports under `src/lib/database`.
 - Use the API gateway to control external route exposure; do not weaken
   application-layer authentication based on network placement.
-- Keep `GET /api/health/v1` unauthenticated for readiness checks and return only
-  aggregate status. It is an alias of health v2 and is unaffected by the
-  conversation V1 retirement.
+- Keep `GET /api/health/v2` unauthenticated for readiness checks and return only
+  aggregate status. `/api/health/v1` is retired and must fall through to the
+  terminal `404` handler.
 
 ## Webhook Ingress
 

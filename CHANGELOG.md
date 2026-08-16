@@ -8,6 +8,14 @@ and this project uses [Semantic Versioning](https://semver.org/). See
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-15
+
+### Removed
+
+- **Breaking.** Removed `GET /api/health/v1`. The endpoint now returns
+  `404 {"error":"Not found"}`. Operators must repoint all readiness probes to
+  `GET /api/health/v2` before deploying.
+
 ### Changed
 
 - Renamed the project and canonical Docker Hub image from `resend-service` to
