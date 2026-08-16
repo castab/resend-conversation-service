@@ -74,7 +74,7 @@ Every V2 conversation send or enqueue request requires structured `from` and `re
 
 `address` is required. `name` is optional and may be omitted or null. Blank names normalize to null. Names are limited to 256 JavaScript characters, must be header-safe, and cannot contain `<` or `>`.
 
-Addresses containing whitespace are invalid. After validation, the service trims and lowercases each address before authorization. Authorization requires exact database matches:
+Leading and trailing address whitespace is trimmed before lowercase normalization; whitespace within an address is invalid. Authorization requires exact database matches:
 
 | Request field | Required allowlist role |
 | --- | --- |
@@ -131,7 +131,7 @@ When a `V1`-tagged conversation is promoted, its existing persisted Reply-To bas
 | `POST` | `/api/conversations/v2/{conversationId}/messages/outbox` | Persist and enqueue a reply | `202`, replay `200`/`202` | `400`, `401`, `404`, `409`, `413`, `415`, `500`, `502`, `503` |
 | `GET` | `/api/conversations/v2/topics/{topicType}/{externalTopicId}` | Read by external topic | `200` | `400`, `401`, `404`, `500` |
 
-All V2 routes except drain use `EMAIL_v2_API_KEY`. Drain uses only `OUTBOX_DRAIN_API_KEY`.
+All authenticated direct-email and conversation V2 routes use `EMAIL_v2_API_KEY`. `/api/health/v2` is unauthenticated. Drain uses only `OUTBOX_DRAIN_API_KEY`.
 
 ## Direct email workflow
 
@@ -307,7 +307,7 @@ Every conversation read includes `state`, `stateChangedAt`, and a derived `await
 | `concluded` | The exchange is finished and needs no follow-up | Operators, through the state route |
 | `terminated` | The participant is unreachable, or an operator ended the thread | A bounced, complained, or suppressed outbound delivery, or the state route |
 
-`stateChangedAt` moves only when the state value itself changes, so a conversation waiting on a reply keeps the timestamp of the message that started the wait however many further messages arrive. Automatic transitions never move a `terminated` conversation; inbound mail reopens a `concluded` one. A send-side `email.failed` is not terminal, since it says nothing about whether the participant can be reached.
+Automatic mail-flow transitions move `stateChangedAt` only when the state value changes, so a conversation waiting on a reply keeps the timestamp of the message that started the wait however many further messages arrive. Every successful manual state write resets `stateChangedAt`, including a repeated state value. Automatic transitions never move a `terminated` conversation; inbound mail reopens a `concluded` one. A send-side `email.failed` is not terminal, since it says nothing about whether the participant can be reached.
 
 `GET /api/conversations/v2/summary` returns `counts` for all four states regardless of any filter, `count` for the selected states, and a page of conversations ordered by oldest `stateChangedAt` first. Filter with `state`, repeated or comma-separated and matched case-insensitively; omit it to list every state. `?state=awaiting_us` is therefore a reply queue with the longest wait at the top. Paginate with `limit` from 1 through 100 and the opaque `page.before` cursor.
 
@@ -408,7 +408,7 @@ Outbound `deliveryState` is projected later from Resend lifecycle webhooks. `del
 | Status | Meaning | Retry guidance |
 | --- | --- | --- |
 | `400` | Invalid JSON, headers, IDs, filters, payload, V2 identity authorization, or fixed Reply-To mismatch | Change the request; do not probe identity policy |
-| `401` | Missing or invalid credential/signature | Correct credentials or signature |
+| `401` | Invalid credential or Svix signature | Correct credentials or signature |
 | `404` | Conversation, topic conversation, or reply parent missing | Retry only after state or identifier changes |
 | `409` | Idempotency conflict, topic/assignment conflict, or missing parent RFC ID | Reconcile state or change the logical request |
 | `413` | Raw JSON body exceeds the 2100 KB transport limit | Reduce the request; do not retry unchanged |
@@ -425,7 +425,7 @@ Outbox retries are server-managed. Observed behavior uses a 2-minute lease, then
 
 ## Webhook behavior
 
-`POST /api/webhooks/resend/v1` verifies the exact raw body before JSON transformation. Completed duplicate deliveries are idempotent by `svix-id` and return `200`.
+`POST /api/webhooks/resend/v1` verifies the exact raw body before JSON transformation. Completed duplicate deliveries are idempotent by `(event family, svix-id)` and return `200`. Missing required Svix headers are `400`; an invalid supplied signature is `401`.
 
 For `email.received`, the service retrieves body and header metadata but never attachments. RFC ancestry is authoritative for conversation membership. When ancestry cannot resolve a conversation, a generated address token in `to` or `received_for` is a fallback only when the sender matches the conversation participant and, for V2-managed routing, the candidate base matches the persisted base.
 
@@ -493,6 +493,8 @@ curl -i \
 - No browser-safe authentication or correlation/request ID is defined.
 - Gateway exposure policy is deployment-owned and not included in this contract.
 - Topic lookup does not enforce the documented 255-character `externalTopicId` limit although create and assignment do; consumers must follow the stricter contract.
-- Runtime webhook family validation is broader than the documented event enums; only documented events are supported.
-- Health readiness depends on `EMAIL_v2_API_KEY`, `OUTBOX_DRAIN_API_KEY`, and a valid `RESEND_REPLY_TO` base.
+- Runtime webhook family validation accepts signed `email.*`, `contact.*`, and `domain.*` types when their payload can be projected, while the OpenAPI event enums remain the strict supported contract. Consumers should send only documented Resend event types.
+- Health readiness requires `DATABASE_URL`, `RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET`, a valid `RESEND_REPLY_TO` base, an EMAIL V2 credential, `OUTBOX_DRAIN_API_KEY`, and PostgreSQL connectivity.
+- Runtime accepts trimmed, case-insensitive state values for the manual state route; use the lowercase OpenAPI enum values as the supported contract.
+- Manual state writes reset `stateChangedAt` even on a no-op repeat; automatic mail-flow transitions update it only when the state changes.
 - Integration coverage confirms credential separation, structured identity validation, role separation, generic rejection, alias preservation, promotion of `V1`-tagged conversations, allowlist revocation behavior, fixed Reply-To base behavior, and token-based inbound routing.

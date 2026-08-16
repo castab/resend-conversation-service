@@ -20,7 +20,7 @@ Use the upstream `openapi.json`, consumer guide, release notes, and versioned se
 | Scope | Credential |
 | --- | --- |
 | Conversation V2 and direct email | `Authorization: Bearer <EMAIL_v2_API_KEY>` |
-| Any shared outbox drain alias | `Authorization: Bearer <OUTBOX_DRAIN_API_KEY>` |
+| Shared outbox drain | `Authorization: Bearer <OUTBOX_DRAIN_API_KEY>` |
 | Resend webhook | Exact-body `svix-id`, `svix-timestamp`, `svix-signature` |
 
 Credentials are not interchangeable and are never browser-safe.
@@ -52,7 +52,7 @@ For direct email, send structured `from`, one structured `to` identity or a none
 
 V2 `to` supports up to 50 recipients. Conversation `to` recipients are outbound-only and do not replace the single conversation participant; when omitted, conversation sends target the participant. V2 tags are limited to 10 nonblank `{name,value}` pairs with each string at most 256 characters.
 
-Addresses containing whitespace are invalid; accepted addresses are normalized to lowercase. The database must contain an exact `(address, FROM)` row for `from.address` and an exact `(address, REPLY_TO)` row for `replyTo.address`. Roles are not interchangeable; wildcard, domain, alias, and display-name authorization do not exist. Allowlist administration is database-only.
+Leading and trailing address whitespace is trimmed before lowercase normalization; whitespace within an address is invalid. The database must contain an exact `(address, FROM)` row for `from.address` and an exact `(address, REPLY_TO)` row for `replyTo.address`. Roles are not interchangeable; wildcard, domain, alias, and display-name authorization do not exist. Allowlist administration is database-only.
 
 Identity denial and fixed Reply-To base mismatch both return generic `400`:
 
@@ -70,7 +70,7 @@ The complete route layout:
 | --- | --- | --- |
 | `POST` | `/api/emails/v2` | Synchronously send direct email without conversation, Reply-To, or threading headers |
 | `POST` | `/api/emails/v2/outbox` | Persist and enqueue direct email in the shared outbox |
-| `POST` | `/api/emails/v2/outbox/drain` | Preferred alias for draining one shared direct/conversation batch |
+| `POST` | `/api/emails/v2/outbox/drain` | Drain one shared direct/conversation batch at the only drain route |
 | `POST`, `GET` | `/api/conversations/v2` | Create/send; list unassigned with `assignment=unassigned` |
 | `GET` | `/api/conversations/v2/summary` | Counts per conversation state plus a filterable page of conversation metadata |
 | `POST` | `/api/conversations/v2/outbox` | Enqueue opening message; pending idempotent replay also returns `202` |
@@ -101,7 +101,7 @@ The complete route layout:
 13. `accepted` is provider API acceptance, not final delivery. Direct email has no read endpoint for later projected delivery state.
 14. Out-of-order row reconciliation preserves one-way V2 promotion and historical routing-token/base aliases when conversations merge.
 15. Conversation `state` is one of `awaiting_us`, `awaiting_participant`, `concluded`, `terminated`, with `stateChangedAt` and a derived `awaitingReply` boolean. Inbound sets `awaiting_us`; persisted outbound reply intent sets `awaiting_participant`; a bounced, complained, or suppressed outbound delivery sets `terminated`. `email.failed` is not terminal.
-16. `stateChangedAt` moves only when the state value changes, so `awaiting_us` records when the wait began.
+16. Automatic mail-flow transitions move `stateChangedAt` only when the state value changes, so `awaiting_us` records when the wait began. Every successful manual state write resets it, including a repeated state value.
 17. Automatic transitions never move `terminated`; inbound mail reopens `concluded`. Merges take `terminated` > `awaiting_us` > `awaiting_participant` > `concluded` with the earliest timestamp of the winning state.
 18. State transitions are driven by mail flow rather than by the route that triggered them, so they apply equally to conversations created before the V1 retirement. The state route permits every transition and repeating one succeeds.
 
@@ -145,5 +145,7 @@ Conversations created before the V1 retirement are still stored with `apiVersion
 - Topic lookup is more lenient than create/assignment for `externalTopicId` length. Keep it at 255 characters or fewer.
 - Some uncaught infrastructure failures may not return the standard JSON error envelope.
 - No formal client timeout, request correlation ID, or gateway exposure contract is published.
-- Health readiness requires the V2 and drain credentials plus `RESEND_REPLY_TO`.
+- Health readiness requires `DATABASE_URL`, `RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET`, a valid `RESEND_REPLY_TO`, an EMAIL V2 credential, `OUTBOX_DRAIN_API_KEY`, and PostgreSQL connectivity.
+- Runtime accepts trimmed, case-insensitive manual state values; use lowercase OpenAPI enum values.
+- Runtime webhook family acceptance is broader than the documented event enums; send only documented Resend event types.
 - Dedicated tests cover central V2 identity, promotion, revocation, and routing behavior; not every mirrored read/mutation route has a separate V2 integration case.
