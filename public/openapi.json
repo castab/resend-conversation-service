@@ -200,7 +200,7 @@
             }
           },
           "400": {
-            "description": "One or more required Svix headers are missing, or the signed event type is unsupported.",
+            "description": "One or more required Svix headers are missing, or the signed event type does not belong to a recognized Resend event family.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2124,7 +2124,7 @@
           "stateChangedAt": {
             "type": "string",
             "format": "date-time",
-            "description": "When the conversation last entered its current state. It only moves when the state value changes, so for awaiting_us it records how long the reply has been owed."
+            "description": "For automatic mail-flow transitions, when the conversation last entered its current state. Automatic transitions only move it when the state value changes, so for awaiting_us it records how long the reply has been owed. A successful manual state write resets it, including a repeated state value."
           },
           "awaitingReply": {
             "type": "boolean",
