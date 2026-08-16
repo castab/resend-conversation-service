@@ -72,10 +72,10 @@ jobs:
       - name: Wait for application
         run: |
           for i in {1..30}; do
-            curl --fail --silent http://localhost:3000/api/health/v1 && break
+            curl --fail --silent http://localhost:3000/api/health/v2 && break
             sleep 1
           done
-          curl --fail --silent http://localhost:3000/api/health/v1 > /dev/null || (cat app.log && exit 1)
+          curl --fail --silent http://localhost:3000/api/health/v2 > /dev/null || (cat app.log && exit 1)
 
       - name: Run tests
         run: npm run test:postgresql
@@ -108,11 +108,12 @@ jobs:
             -e OUTBOX_DRAIN_API_KEY=test-outbox-drain-api-key \
             resend-conversation-service:test
           for i in {1..30}; do
-            curl --fail --silent http://localhost:3100/api/health/v1 && break
+            curl --fail --silent http://localhost:3100/api/health/v2 && break
             sleep 1
           done
-          curl --fail --silent http://localhost:3100/api/health/v1 > /dev/null || (docker logs resend-conversation-service-smoke && exit 1)
+          curl --fail --silent http://localhost:3100/api/health/v2 > /dev/null || (docker logs resend-conversation-service-smoke && exit 1)
           curl --fail --silent http://localhost:3100/openapi.json > /dev/null
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://localhost:3100/api/health/v1)" = "404"
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://localhost:3100/api/conversations/v2?assignment=unassigned)" = "401"
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://localhost:3100/api/conversations/v1?assignment=unassigned)" = "404"
           docker rm -f resend-conversation-service-smoke

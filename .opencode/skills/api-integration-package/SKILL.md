@@ -82,13 +82,13 @@ capture:
 
 Required shared route inventory for this repo:
 
-- `GET /api/health/v1`
+- `GET /api/health/v2`
 - `POST /api/webhooks/resend/v1`
 
 Conversation API V1 was retired in 0.5.0. Do not document
 `/api/conversations/v1` as an available route; record it only under retirement
-and migration guidance. `GET /api/health/v1` and `POST /api/webhooks/resend/v1`
-are unrelated to that retirement and remain current.
+and migration guidance. `GET /api/health/v1` was removed in 0.6.0;
+`POST /api/webhooks/resend/v1` remains current.
 
 Required V2 route inventory:
 

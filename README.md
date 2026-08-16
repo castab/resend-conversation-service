@@ -48,7 +48,6 @@ railway.json            # Railway build and deployment configuration
 
 ```text
 GET   /api/health/v2
-GET   /api/health/v1
 POST  /api/webhooks/resend/v1
 POST  /api/emails/v2
 POST  /api/emails/v2/outbox
@@ -67,13 +66,12 @@ GET   /docs
 GET   /openapi.json
 ```
 
-The health endpoint is available at both `/api/health/v2` and
-`/api/health/v1`; `v1` remains as a compatibility alias for deployment
-readiness checks. The webhook requires a valid signature over the exact raw
-body and all three Svix headers. Conversation operations and direct email
-require `EMAIL_v2_API_KEY` (or `EMAIL_V2_API_KEY` as a fallback). Both outbox
-drain routes use `OUTBOX_DRAIN_API_KEY`. Sending and enqueueing operations also require
-`Idempotency-Key`.
+The unauthenticated readiness endpoint is `/api/health/v2`.
+`/api/health/v1` is retired and returns `404`. The webhook requires a valid
+signature over the exact raw body and all three Svix headers. Conversation
+operations and direct email require `EMAIL_v2_API_KEY` (or `EMAIL_V2_API_KEY`
+as a fallback). Both outbox drain routes use `OUTBOX_DRAIN_API_KEY`. Sending
+and enqueueing operations also require `Idempotency-Key`.
 
 `POST /api/webhooks/resend/v1` remains the supported long-term Resend webhook
 ingress. Its `v1` path is unrelated to the retired conversation API and will
@@ -368,9 +366,9 @@ Detailed release steps and the versioning policy live in
 ## Railway
 
 Create one service from this repository and use `/railway.json`. Configure all
-runtime variables before deployment because `/api/health/v2` and the retained
-`/api/health/v1` alias both check the complete configuration. The pre-deploy
-command applies pending Prisma migrations.
+runtime variables before deployment because `/api/health/v2` checks the
+complete configuration. The pre-deploy command applies pending Prisma
+migrations.
 
 Route public and private traffic through the API gateway as needed. Keep bearer
 authentication enabled even when conversation routes are gateway-restricted.

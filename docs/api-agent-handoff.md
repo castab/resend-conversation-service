@@ -1,6 +1,6 @@
 # API Agent Handoff
 
-Contract version: `0.4.0`
+Contract version: `0.6.0`
 
 ## Sources
 
@@ -80,7 +80,9 @@ The complete route layout:
 | `POST` | `/api/conversations/v2/{conversationId}/messages/outbox` | Enqueue reply; pending idempotent replay also returns `202` |
 | `GET` | `/api/conversations/v2/topics/{topicType}/{externalTopicId}` | Read by topic |
 
-`GET /api/health/v2` and `GET /api/health/v1` are both unauthenticated and have identical readiness behavior. `POST /api/webhooks/resend/v1` is Svix-authenticated.
+`GET /api/health/v2` is unauthenticated and provides readiness behavior.
+`GET /api/health/v1` was removed in 0.6.0 and returns `404 {"error":"Not found"}`.
+`POST /api/webhooks/resend/v1` is Svix-authenticated.
 
 ## Critical invariants
 
@@ -135,7 +137,7 @@ Conversations created before the V1 retirement are still stored with `apiVersion
 7. Reconcile queued direct state by replaying the enqueue operation with the same key and normalized request; do not create a replacement send with a new key.
 8. Schedule the shared drain with the dedicated credential at `/api/emails/v2/outbox/drain`. It is the only drain route.
 9. Sanitize response HTML.
-10. Validate request and response models against upstream OpenAPI contract `0.5.0`.
+10. Validate request and response models against upstream OpenAPI contract `0.6.0`.
 
 ## Known concerns
 

@@ -18,7 +18,7 @@
   },
   "deploy": {
     "preDeployCommand": "npm run db:migrate:deploy",
-    "healthcheckPath": "/api/health/v1",
+    "healthcheckPath": "/api/health/v2",
     "healthcheckTimeout": 120,
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 3

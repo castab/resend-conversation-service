@@ -26,7 +26,6 @@ import { GET as getConversationByTopicV2 } from '@/routes/conversations/v2/topic
 import { POST as drainEmailOutboxV2 } from '@/routes/emails/v2/outbox/drain/route';
 import { POST as enqueueDirectEmailV2 } from '@/routes/emails/v2/outbox/route';
 import { POST as sendDirectEmailV2 } from '@/routes/emails/v2/route';
-import { GET as healthV1 } from '@/routes/health/v1/route';
 import { GET as healthV2 } from '@/routes/health/v2/route';
 import { POST as webhook } from '@/routes/webhooks/resend/v1/route';
 
@@ -117,7 +116,6 @@ export function createApp() {
   const app = express();
   app.disable('x-powered-by');
 
-  app.get('/api/health/v1', adapt(healthV1));
   app.get('/api/health/v2', adapt(healthV2));
   app.post('/api/webhooks/resend/v1', rawBody, adapt(webhook));
   app.post(
