@@ -1,10 +1,9 @@
-name: Publish Docker Image
+name: Publish Release Candidate
 
 on:
   push:
     tags:
-      - "v*.*.*"
-      - "!v*-rc.*"
+      - "v*-rc.*"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -22,7 +21,7 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914d8f5 # v4
         with:
           fetch-depth: 0
 
@@ -50,11 +49,9 @@ jobs:
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
           images: ${{ env.IMAGE_NAME }}
+          flavor: latest=false
           tags: |
             type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=raw,value=latest
           labels: |
             org.opencontainers.image.title=resend-conversation-service
             org.opencontainers.image.description=Resend webhook ingestion and topic-centered email conversation service.
@@ -69,7 +66,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-      - name: Create GitHub release
+      - name: Create GitHub prerelease
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -83,4 +80,5 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             --repo "$GITHUB_REPOSITORY" \
             --title "Release $GITHUB_REF_NAME" \
+            --prerelease \
             --notes-file release-notes.md

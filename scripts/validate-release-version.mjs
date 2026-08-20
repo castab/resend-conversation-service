@@ -2,7 +2,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const root = process.cwd();
-const stableSemverPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+const releaseSemverPattern =
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-rc\.(0|[1-9]\d*))?$/;
 
 function readJson(path) {
   return JSON.parse(readFileSync(resolve(root, path), 'utf8'));
@@ -36,9 +37,9 @@ const consumerGuide = readFileSync(
 
 const version = packageJson.version;
 
-if (!stableSemverPattern.test(version)) {
+if (!releaseSemverPattern.test(version)) {
   fail(
-    `package.json version must be stable SemVer x.y.z. Received: ${version}`,
+    `package.json version must be stable SemVer x.y.z or RC SemVer x.y.z-rc.n. Received: ${version}`,
   );
 }
 
@@ -77,9 +78,9 @@ if (rawTag) {
   }
 
   const tagVersion = normalizedTag.slice(1);
-  if (!stableSemverPattern.test(tagVersion)) {
+  if (!releaseSemverPattern.test(tagVersion)) {
     fail(
-      `Release tags must use stable SemVer like v0.0.1. Received: ${normalizedTag}`,
+      `Release tags must use stable SemVer like v0.0.1 or RC SemVer like v0.7.0-rc.1. Received: ${normalizedTag}`,
     );
   }
 
