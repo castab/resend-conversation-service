@@ -32,8 +32,8 @@ jobs:
         name: Resolve release tag
         run: |
           case "$RELEASE_TAG" in
-            v*-rc.*) ;;
-            *) echo "RC tags must match v*-rc.*. Received: $RELEASE_TAG" >&2; exit 1 ;;
+            v*.*.*-rc.*) ;;
+            *) echo "RC tags must match v*.*.* -rc.*. Received: $RELEASE_TAG" >&2; exit 1 ;;
           esac
           echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
           echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"

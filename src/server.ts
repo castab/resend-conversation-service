@@ -290,8 +290,12 @@ async function startServer() {
     };
     process.on('SIGTERM', shutdown);
     process.on('SIGINT', shutdown);
-  } catch {
-    console.error('Conversation event runtime failed to start');
+  } catch (error) {
+    const details =
+      error instanceof Error
+        ? `${error.name}: ${error.message}`
+        : String(error);
+    console.error(`Conversation event runtime failed to start: ${details}`);
     process.exit(1);
   }
 }
