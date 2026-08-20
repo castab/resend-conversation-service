@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - "v*-rc.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing RC tag to publish or retry
+        required: true
+        type: string
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -14,6 +20,7 @@ permissions:
 
 env:
   IMAGE_NAME: castab/resend-conversation-service
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   publish:
@@ -21,21 +28,32 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914d8f5 # v4
+      - id: release
+        name: Resolve release tag
+        run: |
+          case "$RELEASE_TAG" in
+            v*-rc.*) ;;
+            *) echo "RC tags must match v*-rc.*. Received: $RELEASE_TAG" >&2; exit 1 ;;
+          esac
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
+          ref: ${{ steps.release.outputs.tag }}
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
 
       - name: Validate release version metadata
-        run: node scripts/validate-release-version.mjs "$GITHUB_REF_NAME"
+        run: node scripts/validate-release-version.mjs "$RELEASE_TAG"
 
       - name: Verify tagged commit is on main
         run: |
           git fetch origin main --depth=1
-          tagged_commit="$(git rev-list -n 1 "$GITHUB_REF_NAME")"
+          tagged_commit="$(git rev-list -n 1 "$RELEASE_TAG")"
           git merge-base --is-ancestor "$tagged_commit" origin/main
 
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
@@ -51,7 +69,7 @@ jobs:
           images: ${{ env.IMAGE_NAME }}
           flavor: latest=false
           tags: |
-            type=semver,pattern={{version}}
+            type=raw,value=${{ steps.release.outputs.version }}
           labels: |
             org.opencontainers.image.title=resend-conversation-service
             org.opencontainers.image.description=Resend webhook ingestion and topic-centered email conversation service.
@@ -70,15 +88,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          version="${GITHUB_REF_NAME#v}"
+          version="${RELEASE_TAG#v}"
           awk -v version="$version" '
             $0 ~ "^## \\[" version "\\]" { capture = 1; next }
             capture && /^## \[/ { exit }
             capture { print }
           ' CHANGELOG.md > release-notes.md
           test -s release-notes.md
-          gh release create "$GITHUB_REF_NAME" \
+          gh release create "$RELEASE_TAG" \
             --repo "$GITHUB_REPOSITORY" \
-            --title "Release $GITHUB_REF_NAME" \
+            --title "Release $RELEASE_TAG" \
             --prerelease \
             --notes-file release-notes.md
