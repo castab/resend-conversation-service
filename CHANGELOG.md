@@ -8,6 +8,13 @@ and this project uses [Semantic Versioning](https://semver.org/). See
 
 ## [Unreleased]
 
+## [0.7.0-rc.2] - 2026-08-20
+
+### Fixed
+
+- Included the underlying conversation event sink startup error in the
+  diagnostic log without logging credentials.
+
 ## [0.7.0-rc.1] - 2026-08-20
 
 ### Added
