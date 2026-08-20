@@ -52,7 +52,7 @@ jobs:
 
       - name: Verify tagged commit is on main
         run: |
-          git fetch origin main --depth=1
+          git fetch origin main --prune
           tagged_commit="$(git rev-list -n 1 "$RELEASE_TAG")"
           git merge-base --is-ancestor "$tagged_commit" origin/main
 
