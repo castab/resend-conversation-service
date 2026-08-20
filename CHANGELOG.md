@@ -8,6 +8,18 @@ and this project uses [Semantic Versioning](https://semver.org/). See
 
 ## [Unreleased]
 
+## [0.7.0-rc.1] - 2026-08-20
+
+### Added
+
+- Added an optional durable conversation event feed that publishes compact,
+  versioned lifecycle events to NATS JetStream, Kafka, or both concurrently.
+- Added per-sink delivery tracking, leases, retries, per-conversation ordering,
+  and aggregate readiness reporting while enabled sinks are unhealthy.
+- Added configuration validation and startup connectivity checks for the NATS
+  and Kafka conversation event sinks. The feature remains disabled when no sink
+  is configured.
+
 ## [0.6.0] - 2026-08-15
 
 ### Removed
