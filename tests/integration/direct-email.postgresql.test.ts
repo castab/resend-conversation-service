@@ -26,6 +26,10 @@ describe('Direct email API v2', () => {
 
   beforeEach(async () => {
     await database.query('TRUNCATE TABLE resend_wh_emails');
+    await database.query(
+      'TRUNCATE TABLE conversation_event_deliveries CASCADE',
+    );
+    await database.query('TRUNCATE TABLE conversation_events CASCADE');
     await database.query('TRUNCATE TABLE email_outbox_batches CASCADE');
     await database.query('TRUNCATE TABLE email_messages CASCADE');
     await database.query('TRUNCATE TABLE email_conversations CASCADE');

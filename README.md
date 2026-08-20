@@ -8,6 +8,12 @@ direct non-conversation email. An external
 API gateway controls which paths are publicly reachable; authentication and
 signature verification remain enforced by the application.
 
+When enabled, the application also writes compact conversation lifecycle events
+to a durable PostgreSQL outbox and publishes them from an internal worker to
+NATS JetStream, Kafka, or both. Events never contain email addresses, content,
+or raw provider payloads; consumers use their normal authorized conversation
+read requests for that data.
+
 ## Architecture
 
 ```text
@@ -188,6 +194,10 @@ RESEND_WEBHOOK_SECRET=whsec_xxxxxxxxx
 RESEND_REPLY_TO=mailbox@replies.example.com
 EMAIL_v2_API_KEY=replace-with-a-long-random-secret
 OUTBOX_DRAIN_API_KEY=replace-with-another-long-random-secret
+
+# Optional: leave unset to disable conversation event publishing.
+# Both sinks can be enabled together; every enabled sink must connect at startup.
+CONVERSATION_EVENTS_SINKS=
 ```
 
 Callers use `EMAIL_v2_API_KEY` and select only database-allowlisted identities
@@ -195,6 +205,22 @@ in each request. Deployments may use `EMAIL_V2_API_KEY` as an interchangeable
 fallback; when both variables are nonempty, `EMAIL_v2_API_KEY` takes precedence.
 `RESEND_REPLY_TO` remains required: it is the Reply-To base used for inbound
 routing-token validation.
+
+### Conversation event feed
+
+Set `CONVERSATION_EVENTS_SINKS=nats`, `kafka`, or `nats,kafka` to enable the
+internal dispatcher. NATS requires `CONVERSATION_EVENTS_NATS_SERVERS`,
+`CONVERSATION_EVENTS_NATS_STREAM`, and `CONVERSATION_EVENTS_NATS_SUBJECT`.
+Kafka requires `CONVERSATION_EVENTS_KAFKA_BROKERS`,
+`CONVERSATION_EVENTS_KAFKA_CLIENT_ID`, and `CONVERSATION_EVENTS_KAFKA_TOPIC`.
+The process validates and connects to every enabled sink before listening.
+
+Events are at-least-once and must be deduplicated by their `id`. Their compact
+payload contains a schema version, event type, conversation ID, per-conversation
+sequence, time, topic when assigned, and non-sensitive cause metadata. The
+initial event types are conversation creation, inbound and outbound message
+lifecycle, state changes, assignment, delivery updates, and merges. Enabling a
+sink starts delivery only for events committed after that sink becomes active.
 
 Every Reply-To base must be a plain mailbox on a Resend Receiving domain, without a display name or an
 existing `+` tag. Resend must accept every generated

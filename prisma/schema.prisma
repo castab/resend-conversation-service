@@ -52,6 +52,21 @@ enum ConversationState {
   TERMINATED
 }
 
+enum ConversationEventType {
+  CREATED
+  MESSAGE_RECEIVED
+  MESSAGE_OUTBOUND_INTENDED
+  STATE_CHANGED
+  ASSIGNED
+  MESSAGE_DELIVERY_UPDATED
+  MERGED
+}
+
+enum ConversationEventSink {
+  NATS
+  KAFKA
+}
+
 model EmailConversation {
   id                       String           @id @default(dbgenerated("uuidv7()")) @db.Uuid
   routingToken             String           @unique(map: "email_conversations_routing_token_key") @default(dbgenerated("gen_random_uuid()")) @map("routing_token") @db.Uuid
@@ -69,6 +84,7 @@ model EmailConversation {
   lastMessageAt            DateTime         @map("last_message_at") @db.Timestamptz(6)
   createdAt                DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+  eventSequence            Int              @default(0) @map("event_sequence")
   messages                 EmailMessage[]
   routingAliases           EmailConversationRoutingAlias[]
 
@@ -76,6 +92,39 @@ model EmailConversation {
   @@index([lastMessageAt], map: "idx_email_conversations_last_message_at")
   @@index([state, stateChangedAt, id], map: "idx_email_conversations_state")
   @@map("email_conversations")
+}
+
+model ConversationEvent {
+  id             String                @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  conversationId String                @map("conversation_id") @db.Uuid
+  sequence       Int
+  type           ConversationEventType
+  occurredAt     DateTime              @map("occurred_at") @db.Timestamptz(6)
+  payload        Json                  @db.JsonB
+  createdAt      DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  deliveries     ConversationEventDelivery[]
+
+  @@unique([conversationId, sequence], map: "conversation_events_conversation_sequence_key")
+  @@index([createdAt, id], map: "idx_conversation_events_created")
+  @@map("conversation_events")
+}
+
+model ConversationEventDelivery {
+  eventId       String                @map("event_id") @db.Uuid
+  sink          ConversationEventSink
+  attemptCount  Int                   @default(0) @map("attempt_count")
+  nextAttemptAt DateTime              @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  leaseToken    String?               @map("lease_token") @db.Uuid
+  leaseUntil    DateTime?             @map("lease_until") @db.Timestamptz(6)
+  publishedAt   DateTime?             @map("published_at") @db.Timestamptz(6)
+  lastErrorCode String?               @map("last_error_code") @db.VarChar(64)
+  createdAt     DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  event         ConversationEvent     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@id([eventId, sink])
+  @@index([sink, nextAttemptAt, leaseUntil, eventId], map: "idx_conversation_event_deliveries_ready")
+  @@map("conversation_event_deliveries")
 }
 
 model EmailConversationRoutingAlias {

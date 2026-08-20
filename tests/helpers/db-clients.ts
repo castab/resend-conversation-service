@@ -68,7 +68,7 @@ export class PostgreSQLTestClient {
       throw new Error('Not connected');
     }
     await this.client.query(
-      'TRUNCATE TABLE email_messages, email_conversations CASCADE',
+      'TRUNCATE TABLE conversation_event_deliveries, conversation_events, email_messages, email_conversations CASCADE',
     );
   }
 

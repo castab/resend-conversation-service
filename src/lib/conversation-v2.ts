@@ -5,6 +5,7 @@ import {
   sendResultResponse,
   serializeMessage,
 } from '@/lib/api';
+import { appendConversationEvent } from '@/lib/conversation-events';
 import {
   deliverPendingMessage,
   ensureInternetMessageId,
@@ -127,7 +128,7 @@ export async function createConversationV2(request: Request, queued: boolean) {
       ) {
         throw new IdentityNotAllowedError();
       }
-      return transaction.emailConversation.create({
+      const conversation = await transaction.emailConversation.create({
         data: {
           routingToken,
           apiVersion: 'V2',
@@ -157,6 +158,22 @@ export async function createConversationV2(request: Request, queued: boolean) {
         },
         include: { messages: true },
       });
+      await appendConversationEvent(transaction, {
+        conversationId: conversation.id,
+        type: 'CREATED',
+        occurredAt: now,
+        actor: 'service',
+        cause: 'outbound_intent',
+      });
+      await appendConversationEvent(transaction, {
+        conversationId: conversation.id,
+        type: 'MESSAGE_OUTBOUND_INTENDED',
+        occurredAt: now,
+        actor: 'service',
+        cause: queued ? 'outbox_enqueue' : 'synchronous_send',
+        messageId: conversation.messages[0].id,
+      });
+      return conversation;
     });
     created = {
       conversationId: conversation.id,
@@ -363,6 +380,27 @@ async function reopenFailedConversation(
         ),
       },
     });
+    await appendConversationEvent(transaction, {
+      conversationId: conversation.id,
+      type: 'MESSAGE_OUTBOUND_INTENDED',
+      occurredAt: input.now,
+      actor: 'service',
+      cause: input.queued ? 'outbox_enqueue' : 'synchronous_send',
+      messageId: message.id,
+    });
+    if (current.state !== 'AWAITING_PARTICIPANT') {
+      await appendConversationEvent(transaction, {
+        conversationId: conversation.id,
+        type: 'STATE_CHANGED',
+        occurredAt: input.now,
+        actor: 'service',
+        cause: 'outbound_intent',
+        state: {
+          from: current.state.toLowerCase(),
+          to: 'awaiting_participant',
+        },
+      });
+    }
     return { conversationId: conversation.id, messageId: message.id };
   });
 }
@@ -529,11 +567,32 @@ export async function createMessageV2(
             updated_at = now()
         WHERE id = ${conversationId}::uuid
       `;
-      await markConversationAwaitingParticipant(
+      const stateChanged = await markConversationAwaitingParticipant(
         transaction,
         conversationId,
         now,
       );
+      await appendConversationEvent(transaction, {
+        conversationId,
+        type: 'MESSAGE_OUTBOUND_INTENDED',
+        occurredAt: now,
+        actor: 'service',
+        cause: queued ? 'outbox_enqueue' : 'synchronous_send',
+        messageId: message.id,
+      });
+      if (stateChanged) {
+        await appendConversationEvent(transaction, {
+          conversationId,
+          type: 'STATE_CHANGED',
+          occurredAt: now,
+          actor: 'service',
+          cause: 'outbound_intent',
+          state: {
+            from: current.state.toLowerCase(),
+            to: 'awaiting_participant',
+          },
+        });
+      }
       return message;
     });
   } catch (error) {

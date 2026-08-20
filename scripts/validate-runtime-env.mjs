@@ -67,3 +67,38 @@ if (!isValidReplyToBaseAddress(process.env.RESEND_REPLY_TO)) {
   );
   process.exit(1);
 }
+
+const eventSinks = (process.env.CONVERSATION_EVENTS_SINKS ?? '')
+  .split(',')
+  .map((value) => value.trim().toLowerCase())
+  .filter(Boolean);
+if (eventSinks.some((sink) => sink !== 'nats' && sink !== 'kafka')) {
+  console.error(
+    'CONVERSATION_EVENTS_SINKS must contain only nats and/or kafka',
+  );
+  process.exit(1);
+}
+if (eventSinks.includes('nats')) {
+  for (const name of [
+    'CONVERSATION_EVENTS_NATS_SERVERS',
+    'CONVERSATION_EVENTS_NATS_STREAM',
+    'CONVERSATION_EVENTS_NATS_SUBJECT',
+  ]) {
+    if (!process.env[name]) {
+      console.error(`Missing ${name} for enabled NATS conversation events`);
+      process.exit(1);
+    }
+  }
+}
+if (eventSinks.includes('kafka')) {
+  for (const name of [
+    'CONVERSATION_EVENTS_KAFKA_BROKERS',
+    'CONVERSATION_EVENTS_KAFKA_CLIENT_ID',
+    'CONVERSATION_EVENTS_KAFKA_TOPIC',
+  ]) {
+    if (!process.env[name]) {
+      console.error(`Missing ${name} for enabled Kafka conversation events`);
+      process.exit(1);
+    }
+  }
+}

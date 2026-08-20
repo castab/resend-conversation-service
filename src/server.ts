@@ -8,6 +8,10 @@ import express, {
 } from 'express';
 import swaggerUiDist from 'swagger-ui-dist';
 import { authorizeEmailV2, authorizeOutboxDrain } from '@/lib/api';
+import {
+  startConversationEventRuntime,
+  stopConversationEventRuntime,
+} from '@/lib/conversation-event-runtime';
 import { getPrismaClient } from '@/lib/database';
 import { POST as enqueueMessageV2 } from '@/routes/conversations/v2/[conversationId]/messages/outbox/route';
 import { POST as sendMessageV2 } from '@/routes/conversations/v2/[conversationId]/messages/route';
@@ -259,23 +263,35 @@ export function createApp() {
 }
 
 if (process.env.NODE_ENV !== 'test') {
-  const port = Number(process.env.PORT ?? 3000);
-  const host = process.env.HOST ?? process.env.HOSTNAME ?? '0.0.0.0';
-  const server = createServer(createApp()).listen(port, host, () =>
-    console.info(`resend-conversation-service listening on ${host}:${port}`),
-  );
-  let closing = false;
-  const shutdown = () => {
-    if (closing) {
-      return;
-    }
-    closing = true;
-    server.close(async () => {
-      await getPrismaClient().$disconnect();
-      process.exit(0);
-    });
-    setTimeout(() => process.exit(1), 10_000).unref();
-  };
-  process.on('SIGTERM', shutdown);
-  process.on('SIGINT', shutdown);
+  void startServer();
+}
+
+async function startServer() {
+  try {
+    const client = getPrismaClient();
+    await startConversationEventRuntime(client);
+    const port = Number(process.env.PORT ?? 3000);
+    const host = process.env.HOST ?? process.env.HOSTNAME ?? '0.0.0.0';
+    const server = createServer(createApp()).listen(port, host, () =>
+      console.info(`resend-conversation-service listening on ${host}:${port}`),
+    );
+    let closing = false;
+    const shutdown = () => {
+      if (closing) {
+        return;
+      }
+      closing = true;
+      server.close(async () => {
+        await stopConversationEventRuntime();
+        await client.$disconnect();
+        process.exit(0);
+      });
+      setTimeout(() => process.exit(1), 10_000).unref();
+    };
+    process.on('SIGTERM', shutdown);
+    process.on('SIGINT', shutdown);
+  } catch {
+    console.error('Conversation event runtime failed to start');
+    process.exit(1);
+  }
 }

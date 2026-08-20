@@ -1,3 +1,4 @@
+import { appendConversationEvent } from '@/lib/conversation-events';
 import type { Prisma, PrismaClient } from '@/lib/database';
 import { markConversationTerminated } from './conversation-state';
 import type { EmailWebhookEvent } from './webhook';
@@ -98,6 +99,15 @@ export async function projectOutboundDeliveryStateForResendEmail(
     return;
   }
 
+  const messageBefore = await client.emailMessage.findFirst({
+    where: { direction: 'OUTBOUND', resendEmailId },
+    select: {
+      id: true,
+      conversationId: true,
+      deliveryState: true,
+      conversation: { select: { state: true } },
+    },
+  });
   await client.emailMessage.updateMany({
     where: { direction: 'OUTBOUND', resendEmailId },
     data: {
@@ -107,25 +117,44 @@ export async function projectOutboundDeliveryStateForResendEmail(
       deliveredAt: projected.deliveredAt,
     },
   });
+  if (
+    messageBefore?.conversationId &&
+    messageBefore.deliveryState !== projected.current.state
+  ) {
+    await appendConversationEvent(client, {
+      conversationId: messageBefore.conversationId,
+      type: 'MESSAGE_DELIVERY_UPDATED',
+      occurredAt: projected.current.eventCreatedAt,
+      actor: 'system',
+      cause: 'resend_delivery_webhook',
+      messageId: messageBefore.id,
+      deliveryState: projected.current.state.toLowerCase(),
+    });
+  }
 
   if (!isUnreachableState(projected.current.state)) {
     return;
   }
   // Direct email carries no conversation, so the filter doubles as the kind check.
-  const message = await client.emailMessage.findFirst({
-    where: {
-      direction: 'OUTBOUND',
-      resendEmailId,
-      conversationId: { not: null },
-    },
-    select: { conversationId: true },
-  });
-  if (message?.conversationId) {
-    await markConversationTerminated(
+  if (messageBefore?.conversationId) {
+    const stateChanged = await markConversationTerminated(
       client,
-      message.conversationId,
+      messageBefore.conversationId,
       projected.current.eventCreatedAt,
     );
+    if (stateChanged) {
+      await appendConversationEvent(client, {
+        conversationId: messageBefore.conversationId,
+        type: 'STATE_CHANGED',
+        occurredAt: projected.current.eventCreatedAt,
+        actor: 'system',
+        cause: 'unreachable_delivery',
+        state: {
+          from: messageBefore.conversation?.state.toLowerCase() ?? null,
+          to: 'terminated',
+        },
+      });
+    }
   }
 }
 
