@@ -7,6 +7,7 @@ import {
   MAX_TITLE_LENGTH,
   readJson,
 } from '@/lib/api';
+import { appendConversationEvent } from '@/lib/conversation-events';
 import { getPrismaClient, Prisma } from '@/lib/database';
 
 export async function GET(
@@ -52,7 +53,19 @@ export async function PATCH(
       await transaction.$queryRaw`
         SELECT pg_advisory_xact_lock(hashtext(${conversationId}))::text
       `;
-      return transaction.emailConversation.updateMany({
+      const current = await transaction.emailConversation.findUnique({
+        where: { id: conversationId },
+        select: { topicType: true, externalTopicId: true, apiVersion: true },
+      });
+      if (
+        !current ||
+        current.topicType !== null ||
+        current.externalTopicId !== null ||
+        current.apiVersion === 'V1'
+      ) {
+        return 0;
+      }
+      const result = await transaction.emailConversation.updateMany({
         where: {
           id: conversationId,
           topicType: null,
@@ -66,8 +79,18 @@ export async function PATCH(
           title: topic.value.title,
         },
       });
+      if (result.count) {
+        await appendConversationEvent(transaction, {
+          conversationId,
+          type: 'ASSIGNED',
+          occurredAt: new Date(),
+          actor: 'operator',
+          cause: 'topic_assignment',
+        });
+      }
+      return result.count;
     });
-    if (assigned.count === 0) {
+    if (assigned === 0) {
       const existing = await client.emailConversation.findUnique({
         where: { id: conversationId },
       });

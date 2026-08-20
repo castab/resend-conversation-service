@@ -1,3 +1,4 @@
+import { conversationEventRuntimeHealthy } from '@/lib/conversation-event-runtime';
 import { getPrismaClient } from '@/lib/database';
 import { isValidReplyToBaseAddress } from '@/lib/email';
 import { resolveEmailV2ApiKey } from '@/lib/environment';
@@ -16,7 +17,8 @@ export async function GET(request: Request) {
     !process.env.RESEND_REPLY_TO ||
     !isValidReplyToBaseAddress(process.env.RESEND_REPLY_TO) ||
     !resolveEmailV2ApiKey() ||
-    !process.env.OUTBOX_DRAIN_API_KEY
+    !process.env.OUTBOX_DRAIN_API_KEY ||
+    !conversationEventRuntimeHealthy()
   ) {
     return Response.json({ status: 'unhealthy' }, { status: 503 });
   }

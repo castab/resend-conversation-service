@@ -20,7 +20,7 @@ async function applyAutomaticState(
   state: ConversationState,
   changedAt: Date,
 ) {
-  await client.$executeRaw`
+  const changed = await client.$executeRaw`
     UPDATE email_conversations
     SET state = ${state}::"ConversationState",
         state_changed_at = ${changedAt},
@@ -29,6 +29,7 @@ async function applyAutomaticState(
       AND state <> ${state}::"ConversationState"
       AND state <> 'TERMINATED'
   `;
+  return changed > 0;
 }
 
 /** Inbound mail hands the turn back to us, reopening a CONCLUDED conversation. */
@@ -37,7 +38,7 @@ export async function markConversationAwaitingUs(
   conversationId: string,
   changedAt: Date,
 ) {
-  await applyAutomaticState(client, conversationId, 'AWAITING_US', changedAt);
+  return applyAutomaticState(client, conversationId, 'AWAITING_US', changedAt);
 }
 
 /** Outbound reply intent hands the turn to the participant. */
@@ -46,7 +47,7 @@ export async function markConversationAwaitingParticipant(
   conversationId: string,
   changedAt: Date,
 ) {
-  await applyAutomaticState(
+  return applyAutomaticState(
     client,
     conversationId,
     'AWAITING_PARTICIPANT',
@@ -63,7 +64,7 @@ export async function markConversationTerminated(
   conversationId: string,
   changedAt: Date,
 ) {
-  await client.$executeRaw`
+  const changed = await client.$executeRaw`
     UPDATE email_conversations
     SET state = 'TERMINATED'::"ConversationState",
         state_changed_at = ${changedAt},
@@ -71,6 +72,7 @@ export async function markConversationTerminated(
     WHERE id = ${conversationId}::uuid
       AND state <> 'TERMINATED'
   `;
+  return changed > 0;
 }
 
 const MERGE_PRECEDENCE: readonly ConversationState[] = [

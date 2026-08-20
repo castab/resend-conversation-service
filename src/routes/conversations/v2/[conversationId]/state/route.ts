@@ -5,6 +5,7 @@ import {
   isUuid,
   readJson,
 } from '@/lib/api';
+import { appendConversationEvent } from '@/lib/conversation-events';
 import { type ConversationState, getPrismaClient } from '@/lib/database';
 import { CONVERSATION_STATE_ERROR, parseConversationState } from '@/lib/email';
 
@@ -36,12 +37,31 @@ export async function POST(
     await transaction.$queryRaw`
       SELECT pg_advisory_xact_lock(hashtext(${conversationId}))::text
     `;
-    return transaction.emailConversation.updateMany({
+    const current = await transaction.emailConversation.findUnique({
       where: { id: conversationId },
-      data: { state, stateChangedAt: new Date() },
+      select: { state: true },
     });
+    if (!current) {
+      return null;
+    }
+    const now = new Date();
+    await transaction.emailConversation.update({
+      where: { id: conversationId },
+      data: { state, stateChangedAt: now },
+    });
+    if (current.state !== state) {
+      await appendConversationEvent(transaction, {
+        conversationId,
+        type: 'STATE_CHANGED',
+        occurredAt: now,
+        actor: 'operator',
+        cause: 'manual_override',
+        state: { from: current.state.toLowerCase(), to: state.toLowerCase() },
+      });
+    }
+    return current;
   });
-  if (updated.count === 0) {
+  if (!updated) {
     return Response.json({ error: 'Conversation not found' }, { status: 404 });
   }
   return getConversationResponse(request, { id: conversationId });

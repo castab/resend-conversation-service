@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { appendConversationEvent } from '@/lib/conversation-events';
 import type { EmailConversation, EmailMessage } from '@/lib/database';
 import { Prisma, type PrismaClient } from '@/lib/database';
 import {
@@ -290,6 +291,12 @@ export async function recordOutboundInternetMessageId(
           where: { conversationId: { in: unassignedConversationIds } },
           data: { conversationId: outbound.conversationId },
         });
+        await recordConversationMerges(
+          transaction,
+          outbound.conversationId,
+          unassignedConversationIds,
+          new Date(),
+        );
       }
       await transaction.emailMessage.updateMany({
         where: {
@@ -499,17 +506,21 @@ export async function projectInboundEmail(
               conversation = eligibleConversations[0];
             }
           }
-          conversation ??= await transaction.emailConversation.create({
-            data: {
-              title: normalizeSubject(email.subject),
-              subject: normalizeSubject(email.subject),
-              participantAddress: participant.address,
-              participantName: displayFrom.name,
-              state: 'AWAITING_US',
-              stateChangedAt: emailCreatedAt,
-              lastMessageAt: emailCreatedAt,
-            },
-          });
+          let createdConversation = false;
+          if (!conversation) {
+            conversation = await transaction.emailConversation.create({
+              data: {
+                title: normalizeSubject(email.subject),
+                subject: normalizeSubject(email.subject),
+                participantAddress: participant.address,
+                participantName: displayFrom.name,
+                state: 'AWAITING_US',
+                stateChangedAt: emailCreatedAt,
+                lastMessageAt: emailCreatedAt,
+              },
+            });
+            createdConversation = true;
+          }
 
           const foreignUnassignedConversationIds = [
             ...new Set(
@@ -544,6 +555,12 @@ export async function projectInboundEmail(
               },
               data: { conversationId: conversation.id },
             });
+            await recordConversationMerges(
+              transaction,
+              conversation.id,
+              foreignUnassignedConversationIds,
+              emailCreatedAt,
+            );
             await transaction.emailConversation.deleteMany({
               where: { id: { in: foreignUnassignedConversationIds } },
             });
@@ -570,6 +587,24 @@ export async function projectInboundEmail(
             },
           });
 
+          if (createdConversation) {
+            await appendConversationEvent(transaction, {
+              conversationId: conversation.id,
+              type: 'CREATED',
+              occurredAt: emailCreatedAt,
+              actor: 'participant',
+              cause: 'inbound_email',
+            });
+          }
+          await appendConversationEvent(transaction, {
+            conversationId: conversation.id,
+            type: 'MESSAGE_RECEIVED',
+            occurredAt: emailCreatedAt,
+            actor: 'participant',
+            cause: 'inbound_email',
+            messageId: message.id,
+          });
+
           await transaction.emailMessage.updateMany({
             where: {
               parentMessageId: null,
@@ -589,11 +624,24 @@ export async function projectInboundEmail(
               data: { lastMessageAt: latest._max.emailCreatedAt },
             });
           }
-          await markConversationAwaitingUs(
+          const stateChanged = await markConversationAwaitingUs(
             transaction,
             conversation.id,
             emailCreatedAt,
           );
+          if (stateChanged && !createdConversation) {
+            await appendConversationEvent(transaction, {
+              conversationId: conversation.id,
+              type: 'STATE_CHANGED',
+              occurredAt: emailCreatedAt,
+              actor: 'participant',
+              cause: 'inbound_email',
+              state: {
+                from: conversation.state.toLowerCase(),
+                to: 'awaiting_us',
+              },
+            });
+          }
 
           return message;
         },
@@ -625,6 +673,31 @@ export async function projectInboundEmail(
   }
 
   throw new Error('Inbound projection retry limit exhausted');
+}
+
+async function recordConversationMerges(
+  transaction: Prisma.TransactionClient,
+  targetConversationId: string,
+  sourceConversationIds: string[],
+  occurredAt: Date,
+) {
+  for (const sourceConversationId of sourceConversationIds) {
+    await appendConversationEvent(transaction, {
+      conversationId: sourceConversationId,
+      type: 'MERGED',
+      occurredAt,
+      actor: 'system',
+      cause: 'thread_reconciliation',
+      mergedIntoConversationId: targetConversationId,
+    });
+  }
+  await appendConversationEvent(transaction, {
+    conversationId: targetConversationId,
+    type: 'MERGED',
+    occurredAt,
+    actor: 'system',
+    cause: 'thread_reconciliation',
+  });
 }
 
 export type ConversationWithMessages = EmailConversation & {
