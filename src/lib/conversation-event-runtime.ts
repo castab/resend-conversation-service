@@ -132,36 +132,127 @@ export async function stopConversationEventRuntime() {
 
 async function createConfiguredSinks(): Promise<ConversationEventSink[]> {
   const names = getEnabledConversationEventSinks();
-  return Promise.all(
+  const results = await Promise.allSettled(
     names.map((name) =>
       name === 'NATS' ? createNatsSink() : createKafkaSink(),
     ),
   );
+  const sinks = results
+    .filter(
+      (result): result is PromiseFulfilledResult<ConversationEventSink> =>
+        result.status === 'fulfilled',
+    )
+    .map((result) => result.value);
+  const failure = results.find(
+    (result): result is PromiseRejectedResult => result.status === 'rejected',
+  );
+  if (failure) {
+    await Promise.all(sinks.map((sink) => sink.close().catch(() => undefined)));
+    throw failure.reason;
+  }
+  return sinks;
 }
 
 async function createNatsSink(): Promise<ConversationEventSink> {
-  const servers = requiredList('CONVERSATION_EVENTS_NATS_SERVERS');
-  const stream = required('CONVERSATION_EVENTS_NATS_STREAM');
-  const subject = required('CONVERSATION_EVENTS_NATS_SUBJECT');
-  const token = optional('CONVERSATION_EVENTS_NATS_TOKEN');
-  const user = optional('CONVERSATION_EVENTS_NATS_USERNAME');
-  const pass = optional('CONVERSATION_EVENTS_NATS_PASSWORD');
-  if (token && (user || pass)) {
-    throw new Error('NATS token and username/password cannot be combined');
+  let servers: string[];
+  let stream: string;
+  let subject: string;
+  let token: string | undefined;
+  let user: string | undefined;
+  let pass: string | undefined;
+  let tlsOptions: ReturnType<typeof natsTlsOptions>;
+  try {
+    servers = requiredList('CONVERSATION_EVENTS_NATS_SERVERS');
+    stream = required('CONVERSATION_EVENTS_NATS_STREAM');
+    subject = required('CONVERSATION_EVENTS_NATS_SUBJECT');
+    token = optional('CONVERSATION_EVENTS_NATS_TOKEN');
+    user = optional('CONVERSATION_EVENTS_NATS_USERNAME');
+    pass = optional('CONVERSATION_EVENTS_NATS_PASSWORD');
+    if (token && (user || pass)) {
+      throw new Error('NATS token and username/password cannot be combined');
+    }
+    if ((user && !pass) || (!user && pass)) {
+      throw new Error('NATS username and password must be provided together');
+    }
+    tlsOptions = natsTlsOptions();
+  } catch (error) {
+    throw startupFailure(
+      'NATS',
+      'validate configuration',
+      natsStartupContext(),
+      error,
+      'Verify the NATS connection, authentication, and TLS environment variables.',
+    );
   }
-  if ((user && !pass) || (!user && pass)) {
-    throw new Error('NATS username and password must be provided together');
+  const context = natsStartupContext({ servers, stream, subject, token, user });
+  let nc: NatsConnection | undefined;
+  try {
+    try {
+      nc = await connect({
+        servers,
+        ...(token ? { token } : {}),
+        ...(user ? { user, pass } : {}),
+        ...tlsOptions,
+      });
+    } catch (error) {
+      throw startupFailure(
+        'NATS',
+        'connect',
+        context,
+        error,
+        'Verify that the configured NATS endpoints are reachable and accept the configured authentication and TLS settings.',
+      );
+    }
+    let manager: Awaited<ReturnType<NatsConnection['jetstreamManager']>>;
+    try {
+      manager = await nc.jetstreamManager();
+    } catch (error) {
+      throw startupFailure(
+        'NATS',
+        'access JetStream manager',
+        context,
+        error,
+        'Verify that JetStream is enabled and that the configured identity can access its management API.',
+      );
+    }
+    try {
+      await manager.streams.info(stream);
+    } catch (error) {
+      throw startupFailure(
+        'NATS',
+        'verify configured stream',
+        context,
+        error,
+        'Verify that the configured JetStream stream exists in the configured account.',
+      );
+    }
+    let subjectStream: string;
+    try {
+      subjectStream = await manager.streams.find(subject);
+    } catch (error) {
+      throw startupFailure(
+        'NATS',
+        'resolve configured subject',
+        context,
+        error,
+        'Verify that the configured subject is captured by a JetStream stream.',
+      );
+    }
+    if (subjectStream !== stream) {
+      throw startupFailure(
+        'NATS',
+        'verify configured subject',
+        context,
+        new Error(`Configured subject resolves to stream "${subjectStream}"`),
+        'Configure a subject captured by the configured JetStream stream.',
+      );
+    }
+    const js = nc.jetstream();
+    return new NatsConversationEventSink(nc, js, subject);
+  } catch (error) {
+    await nc?.close().catch(() => undefined);
+    throw error;
   }
-  const nc = await connect({
-    servers,
-    ...(token ? { token } : {}),
-    ...(user ? { user, pass } : {}),
-    ...natsTlsOptions(),
-  });
-  const manager = await nc.jetstreamManager();
-  await manager.streams.info(stream);
-  const js = nc.jetstream();
-  return new NatsConversationEventSink(nc, js, subject);
 }
 
 class NatsConversationEventSink implements ConversationEventSink {
@@ -190,25 +281,83 @@ class NatsConversationEventSink implements ConversationEventSink {
 }
 
 async function createKafkaSink(): Promise<ConversationEventSink> {
-  const brokers = requiredList('CONVERSATION_EVENTS_KAFKA_BROKERS');
-  const topic = required('CONVERSATION_EVENTS_KAFKA_TOPIC');
-  const clientId = required('CONVERSATION_EVENTS_KAFKA_CLIENT_ID');
-  const kafka = new Kafka({
-    brokers,
-    clientId,
-    logLevel: logLevel.NOTHING,
-    ...kafkaSecurityOptions(),
-  });
-  const admin = kafka.admin();
-  await admin.connect();
+  let brokers: string[];
+  let topic: string;
+  let clientId: string;
+  let securityOptions: ReturnType<typeof kafkaSecurityOptions>;
   try {
-    await admin.fetchTopicMetadata({ topics: [topic] });
+    brokers = requiredList('CONVERSATION_EVENTS_KAFKA_BROKERS');
+    topic = required('CONVERSATION_EVENTS_KAFKA_TOPIC');
+    clientId = required('CONVERSATION_EVENTS_KAFKA_CLIENT_ID');
+    securityOptions = kafkaSecurityOptions();
+  } catch (error) {
+    throw startupFailure(
+      'KAFKA',
+      'validate configuration',
+      kafkaStartupContext(),
+      error,
+      'Verify the Kafka connection, authentication, and TLS environment variables.',
+    );
+  }
+  const context = kafkaStartupContext({ brokers, topic, clientId });
+  let kafka: Kafka;
+  try {
+    kafka = new Kafka({
+      brokers,
+      clientId,
+      logLevel: logLevel.NOTHING,
+      ...securityOptions,
+    });
+  } catch (error) {
+    throw startupFailure(
+      'KAFKA',
+      'initialize client',
+      context,
+      error,
+      'Verify the Kafka broker and security configuration.',
+    );
+  }
+  const admin = kafka.admin();
+  try {
+    try {
+      await admin.connect();
+    } catch (error) {
+      throw startupFailure(
+        'KAFKA',
+        'connect admin client',
+        context,
+        error,
+        'Verify that the configured Kafka endpoints are reachable and accept the configured authentication and TLS settings.',
+      );
+    }
+    try {
+      await admin.fetchTopicMetadata({ topics: [topic] });
+    } catch (error) {
+      throw startupFailure(
+        'KAFKA',
+        'verify topic metadata',
+        context,
+        error,
+        'Verify that the configured topic exists and that the configured identity can describe it.',
+      );
+    }
   } finally {
-    await admin.disconnect();
+    await admin.disconnect().catch(() => undefined);
   }
   const producer = kafka.producer();
-  await producer.connect();
-  return new KafkaConversationEventSink(producer, topic);
+  try {
+    await producer.connect();
+    return new KafkaConversationEventSink(producer, topic);
+  } catch (error) {
+    await producer.disconnect().catch(() => undefined);
+    throw startupFailure(
+      'KAFKA',
+      'connect producer',
+      context,
+      error,
+      'Verify that the configured Kafka identity can establish a producer connection.',
+    );
+  }
 }
 
 class KafkaConversationEventSink implements ConversationEventSink {
@@ -344,6 +493,135 @@ function requiredList(name: string) {
 function optional(name: string) {
   const value = process.env[name];
   return value?.trim() || undefined;
+}
+
+interface NatsStartupContextInput {
+  servers?: string[];
+  stream?: string;
+  subject?: string;
+  token?: string;
+  user?: string;
+}
+
+function natsStartupContext(input: NatsStartupContextInput = {}) {
+  const servers =
+    input.servers ?? optionalList('CONVERSATION_EVENTS_NATS_SERVERS');
+  const stream = input.stream ?? optional('CONVERSATION_EVENTS_NATS_STREAM');
+  const subject = input.subject ?? optional('CONVERSATION_EVENTS_NATS_SUBJECT');
+  const token = input.token ?? optional('CONVERSATION_EVENTS_NATS_TOKEN');
+  const user = input.user ?? optional('CONVERSATION_EVENTS_NATS_USERNAME');
+  const tls = optional('CONVERSATION_EVENTS_NATS_TLS_MODE') ?? 'disabled';
+  return `stream="${stream ?? '<unset>'}", subject="${subject ?? '<unset>'}", endpoints=[${sanitizeEndpoints(servers, 4222)}], auth=${token ? 'token' : user ? 'username_password' : 'none'}, tls=${tls}`;
+}
+
+interface KafkaStartupContextInput {
+  brokers?: string[];
+  topic?: string;
+  clientId?: string;
+}
+
+function kafkaStartupContext(input: KafkaStartupContextInput = {}) {
+  const brokers =
+    input.brokers ?? optionalList('CONVERSATION_EVENTS_KAFKA_BROKERS');
+  const topic = input.topic ?? optional('CONVERSATION_EVENTS_KAFKA_TOPIC');
+  const clientId =
+    input.clientId ?? optional('CONVERSATION_EVENTS_KAFKA_CLIENT_ID');
+  const security = (
+    optional('CONVERSATION_EVENTS_KAFKA_SECURITY_PROTOCOL') ?? 'PLAINTEXT'
+  ).toUpperCase();
+  return `topic="${topic ?? '<unset>'}", clientId="${clientId ?? '<unset>'}", endpoints=[${sanitizeEndpoints(brokers, 9092)}], security=${security}`;
+}
+
+function optionalList(name: string) {
+  const value = optional(name);
+  return value
+    ? value
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter(Boolean)
+    : [];
+}
+
+function sanitizeEndpoints(endpoints: string[], defaultPort: number) {
+  return endpoints
+    .map((endpoint) => sanitizeEndpoint(endpoint, defaultPort))
+    .join(',');
+}
+
+function sanitizeEndpoint(endpoint: string, defaultPort: number) {
+  try {
+    const url = new URL(
+      endpoint.includes('://') ? endpoint : `tcp://${endpoint}`,
+    );
+    return `${url.hostname}:${url.port || defaultPort}`;
+  } catch {
+    const authority = endpoint
+      .replace(/^[a-z][a-z\d+.-]*:\/\//i, '')
+      .replace(/^[^@/\s]+@/, '')
+      .split(/[/?#]/, 1)[0];
+    return authority || '<invalid>';
+  }
+}
+
+function startupFailure(
+  sink: ConversationEventSinkName,
+  operation: string,
+  context: string,
+  error: unknown,
+  remediation: string,
+) {
+  const wrapped = new Error(
+    `Conversation event sink ${sink} failed to ${operation} (${context}): ${safeErrorDetails(error)}. ${remediation}`,
+  );
+  wrapped.name = 'ConversationEventSinkStartupError';
+  return wrapped;
+}
+
+function safeErrorDetails(error: unknown) {
+  const code =
+    typeof error === 'object' && error !== null && 'code' in error
+      ? error.code
+      : undefined;
+  const details =
+    error instanceof Error
+      ? `${error.name}${code ? ` [${String(code)}]` : ''}: ${error.message}`
+      : String(error);
+  return redactConfiguredSecrets(details)
+    .replace(
+      /-----BEGIN [^-]+-----[\s\S]*?-----END [^-]+-----/g,
+      '[redacted PEM]',
+    )
+    .replace(/([a-z][a-z\d+.-]*:\/\/)([^/\s@]+)@/gi, '$1[redacted]@')
+    .replace(
+      /((?:["']?(?:password|passwd|token|secret|authorization|username|user|key|cert|ca)["']?\s*[=:]\s*)(?:"[^"]*"|'[^']*'|[^\s,;}]+))/gi,
+      '$1[redacted]',
+    );
+}
+
+function redactConfiguredSecrets(value: string) {
+  return configuredSecretValues().reduce(
+    (redacted, secret) => redacted.replaceAll(secret, '[redacted]'),
+    value,
+  );
+}
+
+function configuredSecretValues() {
+  return [
+    'CONVERSATION_EVENTS_NATS_TOKEN',
+    'CONVERSATION_EVENTS_NATS_USERNAME',
+    'CONVERSATION_EVENTS_NATS_PASSWORD',
+    'CONVERSATION_EVENTS_NATS_TLS_CA_PEM',
+    'CONVERSATION_EVENTS_NATS_TLS_CERT_PEM',
+    'CONVERSATION_EVENTS_NATS_TLS_KEY_PEM',
+    'CONVERSATION_EVENTS_KAFKA_SASL_USERNAME',
+    'CONVERSATION_EVENTS_KAFKA_SASL_PASSWORD',
+    'CONVERSATION_EVENTS_KAFKA_TLS_CA_PEM',
+    'CONVERSATION_EVENTS_KAFKA_TLS_CERT_PEM',
+    'CONVERSATION_EVENTS_KAFKA_TLS_KEY_PEM',
+  ]
+    .map((name) => process.env[name]?.trim())
+    .filter((value): value is string => Boolean(value))
+    .sort((left, right) => right.length - left.length);
 }
 
 function natsTlsOptions() {
