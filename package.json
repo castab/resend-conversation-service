@@ -1,6 +1,6 @@
 {
   "name": "resend-conversation-service",
-  "version": "0.7.0-rc.2",
+  "version": "0.7.0-rc.3",
   "private": true,
   "packageManager": "npm@11.18.0",
   "engines": {
@@ -52,3 +52,4 @@
     "vitest": "4.0.17"
   }
 }
+
