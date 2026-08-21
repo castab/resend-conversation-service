@@ -188,4 +188,3 @@ Conversations created before the V1 retirement are still stored with `apiVersion
 - Runtime accepts trimmed, case-insensitive manual state values; use lowercase OpenAPI enum values.
 - Runtime webhook family acceptance is broader than the documented event enums; send only documented Resend event types.
 - Dedicated tests cover central V2 identity, promotion, revocation, and routing behavior; not every mirrored read/mutation route has a separate V2 integration case.
-
