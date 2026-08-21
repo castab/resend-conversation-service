@@ -207,4 +207,3 @@ retirement and are unchanged.
 
 - Initial public release process with SemVer metadata, changelog tracking, and
   tag-triggered Docker Hub publication guidance.
-
