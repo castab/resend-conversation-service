@@ -9,8 +9,9 @@ Operational notes are conditional.
 <!--
 One bullet per user-visible or contract-level change, in the imperative.
 Describe what changed and why, not the file-by-file diff.
-Route or behavior changes must keep `public/openapi.json` aligned, and
-contract changes belong in `CHANGELOG.md` under `[Unreleased]`.
+HTTP route or behavior changes must keep `public/openapi.json` aligned. Event
+or broker behavior changes must keep `public/asyncapi.json` aligned. Contract
+changes belong in `CHANGELOG.md` under `[Unreleased]`.
 -->
 
 -

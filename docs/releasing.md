@@ -23,9 +23,10 @@ every later backwards-incompatible change to a major bump. Do not bump to
 `1.0.0` merely because a release removes a legacy surface. Two things should be
 true first:
 
-- `public/openapi.json` matches runtime behavior. The "Compatibility and known
-  gaps" section of [api-consumer-guide.md](api-consumer-guide.md) currently
-  records places where they diverge.
+- `public/openapi.json` and `public/asyncapi.json` match runtime behavior. The
+  "Compatibility and known gaps" section of
+  [api-consumer-guide.md](api-consumer-guide.md) currently records places where
+  implementation and contract diverge.
 - A written deprecation policy exists, so the major-version promise has
   something behind it. There is none today, and releases through `0.5.0` have
   removed surfaces that were documented as having no announced sunset.
@@ -35,6 +36,7 @@ true first:
 - `package.json`
 - `package-lock.json`
 - `public/openapi.json`
+- `public/asyncapi.json`
 - `docs/api-consumer-guide.md`
 - `CHANGELOG.md`
 

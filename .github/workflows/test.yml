@@ -113,6 +113,7 @@ jobs:
           done
           curl --fail --silent http://localhost:3100/api/health/v2 > /dev/null || (docker logs resend-conversation-service-smoke && exit 1)
           curl --fail --silent http://localhost:3100/openapi.json > /dev/null
+          curl --fail --silent http://localhost:3100/asyncapi.json > /dev/null
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://localhost:3100/api/health/v1)" = "404"
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://localhost:3100/api/conversations/v2?assignment=unassigned)" = "401"
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://localhost:3100/api/conversations/v1?assignment=unassigned)" = "404"

@@ -1,0 +1,824 @@
+{
+  "asyncapi": "3.1.0",
+  "id": "urn:resend-conversation-service:conversation-events",
+  "info": {
+    "title": "resend-conversation-service Conversation Events API",
+    "version": "0.7.0-rc.2",
+    "description": "Versioned, non-sensitive conversation lifecycle events published to NATS JetStream, Kafka, or both. The payload is identical on both transports; transport-specific metadata is described on each channel."
+  },
+  "defaultContentType": "application/json",
+  "servers": {
+    "nats": {
+      "host": "{server}",
+      "protocol": "nats",
+      "description": "A NATS server from CONVERSATION_EVENTS_NATS_SERVERS. Subscriber endpoints and credentials are deployment-owned.",
+      "variables": {
+        "server": {
+          "default": "nats:4222",
+          "description": "Deployment-provided NATS host and port."
+        }
+      }
+    },
+    "kafka": {
+      "host": "{broker}",
+      "protocol": "kafka",
+      "description": "A Kafka broker from CONVERSATION_EVENTS_KAFKA_BROKERS. Subscriber endpoints and credentials are deployment-owned.",
+      "variables": {
+        "broker": {
+          "default": "kafka:9092",
+          "description": "Deployment-provided Kafka broker host and port."
+        }
+      }
+    }
+  },
+  "channels": {
+    "natsConversationEvents": {
+      "address": "{subject}",
+      "title": "NATS conversation events",
+      "description": "The configured NATS JetStream subject. JetStream also sets the protocol-defined Nats-Msg-Id to the payload event id for publish deduplication.",
+      "servers": [
+        {
+          "$ref": "#/servers/nats"
+        }
+      ],
+      "parameters": {
+        "subject": {
+          "default": "conversation.events.v1",
+          "description": "The value of CONVERSATION_EVENTS_NATS_SUBJECT."
+        }
+      },
+      "messages": {
+        "conversationCreated": {
+          "$ref": "#/components/messages/conversationCreated"
+        },
+        "conversationMessageReceived": {
+          "$ref": "#/components/messages/conversationMessageReceived"
+        },
+        "conversationMessageOutboundIntended": {
+          "$ref": "#/components/messages/conversationMessageOutboundIntended"
+        },
+        "conversationStateChanged": {
+          "$ref": "#/components/messages/conversationStateChanged"
+        },
+        "conversationAssigned": {
+          "$ref": "#/components/messages/conversationAssigned"
+        },
+        "conversationMessageDeliveryUpdated": {
+          "$ref": "#/components/messages/conversationMessageDeliveryUpdated"
+        },
+        "conversationMerged": {
+          "$ref": "#/components/messages/conversationMerged"
+        }
+      }
+    },
+    "kafkaConversationEvents": {
+      "address": "{topic}",
+      "title": "Kafka conversation events",
+      "description": "The configured Kafka topic. Every record is keyed by the payload conversationId so records for one conversation remain partition-ordered.",
+      "servers": [
+        {
+          "$ref": "#/servers/kafka"
+        }
+      ],
+      "parameters": {
+        "topic": {
+          "default": "conversation-events-v1",
+          "description": "The value of CONVERSATION_EVENTS_KAFKA_TOPIC."
+        }
+      },
+      "messages": {
+        "conversationCreated": {
+          "$ref": "#/components/messages/conversationCreated"
+        },
+        "conversationMessageReceived": {
+          "$ref": "#/components/messages/conversationMessageReceived"
+        },
+        "conversationMessageOutboundIntended": {
+          "$ref": "#/components/messages/conversationMessageOutboundIntended"
+        },
+        "conversationStateChanged": {
+          "$ref": "#/components/messages/conversationStateChanged"
+        },
+        "conversationAssigned": {
+          "$ref": "#/components/messages/conversationAssigned"
+        },
+        "conversationMessageDeliveryUpdated": {
+          "$ref": "#/components/messages/conversationMessageDeliveryUpdated"
+        },
+        "conversationMerged": {
+          "$ref": "#/components/messages/conversationMerged"
+        }
+      }
+    }
+  },
+  "operations": {
+    "publishConversationEventsToNats": {
+      "action": "send",
+      "title": "Publish conversation events to NATS",
+      "summary": "Publishes committed conversation lifecycle events to the configured JetStream subject.",
+      "description": "Delivery is at least once. Deduplicate by payload id, process each conversation by sequence, and do not assume sequence 1 will be available when a sink is enabled later.",
+      "channel": {
+        "$ref": "#/channels/natsConversationEvents"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/natsConversationEvents/messages/conversationCreated"
+        },
+        {
+          "$ref": "#/channels/natsConversationEvents/messages/conversationMessageReceived"
+        },
+        {
+          "$ref": "#/channels/natsConversationEvents/messages/conversationMessageOutboundIntended"
+        },
+        {
+          "$ref": "#/channels/natsConversationEvents/messages/conversationStateChanged"
+        },
+        {
+          "$ref": "#/channels/natsConversationEvents/messages/conversationAssigned"
+        },
+        {
+          "$ref": "#/channels/natsConversationEvents/messages/conversationMessageDeliveryUpdated"
+        },
+        {
+          "$ref": "#/channels/natsConversationEvents/messages/conversationMerged"
+        }
+      ],
+      "bindings": {
+        "nats": {
+          "bindingVersion": "0.1.0"
+        }
+      }
+    },
+    "publishConversationEventsToKafka": {
+      "action": "send",
+      "title": "Publish conversation events to Kafka",
+      "summary": "Publishes committed conversation lifecycle events to the configured Kafka topic.",
+      "description": "Delivery is at least once. Deduplicate by payload id, process each conversation by sequence, and do not assume sequence 1 will be available when a sink is enabled later.",
+      "channel": {
+        "$ref": "#/channels/kafkaConversationEvents"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/kafkaConversationEvents/messages/conversationCreated"
+        },
+        {
+          "$ref": "#/channels/kafkaConversationEvents/messages/conversationMessageReceived"
+        },
+        {
+          "$ref": "#/channels/kafkaConversationEvents/messages/conversationMessageOutboundIntended"
+        },
+        {
+          "$ref": "#/channels/kafkaConversationEvents/messages/conversationStateChanged"
+        },
+        {
+          "$ref": "#/channels/kafkaConversationEvents/messages/conversationAssigned"
+        },
+        {
+          "$ref": "#/channels/kafkaConversationEvents/messages/conversationMessageDeliveryUpdated"
+        },
+        {
+          "$ref": "#/channels/kafkaConversationEvents/messages/conversationMerged"
+        }
+      ]
+    }
+  },
+  "components": {
+    "messages": {
+      "conversationCreated": {
+        "name": "conversation.created",
+        "title": "Conversation created",
+        "summary": "A conversation was created from outbound intent or inbound email.",
+        "payload": {
+          "$ref": "#/components/schemas/ConversationCreatedEvent"
+        },
+        "traits": [{ "$ref": "#/components/messageTraits/conversationEvent" }],
+        "examples": [
+          {
+            "name": "outboundConversationCreated",
+            "headers": {
+              "x-conversation-event-id": "01a02151-83a9-7273-adba-91186c951220",
+              "x-conversation-event-schema-version": "1"
+            },
+            "payload": {
+              "schemaVersion": 1,
+              "id": "01a02151-83a9-7273-adba-91186c951220",
+              "type": "conversation.created",
+              "occurredAt": "2026-08-20T22:36:25.282Z",
+              "conversationId": "01a0192e-efb8-7725-abda-3bec284104ea",
+              "sequence": 1,
+              "topic": {
+                "type": "booking",
+                "externalId": "booking-4821"
+              },
+              "actor": "service",
+              "cause": "outbound_intent"
+            }
+          }
+        ]
+      },
+      "conversationMessageReceived": {
+        "name": "conversation.message.received",
+        "title": "Conversation message received",
+        "summary": "An inbound participant message was projected into a conversation.",
+        "payload": {
+          "$ref": "#/components/schemas/ConversationMessageReceivedEvent"
+        },
+        "traits": [{ "$ref": "#/components/messageTraits/conversationEvent" }],
+        "examples": [
+          {
+            "name": "participantReplyReceived",
+            "headers": {
+              "x-conversation-event-id": "01a0215c-8a8f-765d-b1ba-33352fbe05e8",
+              "x-conversation-event-schema-version": "1"
+            },
+            "payload": {
+              "schemaVersion": 1,
+              "id": "01a0215c-8a8f-765d-b1ba-33352fbe05e8",
+              "type": "conversation.message.received",
+              "occurredAt": "2026-08-20T22:48:24.978Z",
+              "conversationId": "01a0192e-efb8-7725-abda-3bec284104ea",
+              "sequence": 3,
+              "topic": {
+                "type": "booking",
+                "externalId": "booking-4821"
+              },
+              "messageId": "01a0215c-8a6a-769a-bc8e-5fc9b0649985",
+              "actor": "participant",
+              "cause": "inbound_email"
+            }
+          }
+        ]
+      },
+      "conversationMessageOutboundIntended": {
+        "name": "conversation.message.outbound.intended",
+        "title": "Conversation outbound message intended",
+        "summary": "Outbound conversation message intent was durably persisted.",
+        "payload": {
+          "$ref": "#/components/schemas/ConversationMessageOutboundIntendedEvent"
+        },
+        "traits": [{ "$ref": "#/components/messageTraits/conversationEvent" }],
+        "examples": [
+          {
+            "name": "outboxReplyEnqueued",
+            "headers": {
+              "x-conversation-event-id": "01a02151-83a9-7273-adba-91186c951220",
+              "x-conversation-event-schema-version": "1"
+            },
+            "payload": {
+              "schemaVersion": 1,
+              "id": "01a02151-83a9-7273-adba-91186c951220",
+              "type": "conversation.message.outbound.intended",
+              "occurredAt": "2026-08-20T22:36:25.282Z",
+              "conversationId": "01a0192e-efb8-7725-abda-3bec284104ea",
+              "sequence": 1,
+              "topic": {
+                "type": "booking",
+                "externalId": "booking-4821"
+              },
+              "messageId": "01a02151-839a-728c-ad30-6b65bf4038bf",
+              "actor": "service",
+              "cause": "outbox_enqueue"
+            }
+          }
+        ]
+      },
+      "conversationStateChanged": {
+        "name": "conversation.state.changed",
+        "title": "Conversation state changed",
+        "summary": "Mail flow or an operator changed the conversation state.",
+        "payload": {
+          "$ref": "#/components/schemas/ConversationStateChangedEvent"
+        },
+        "traits": [{ "$ref": "#/components/messageTraits/conversationEvent" }],
+        "examples": [
+          {
+            "name": "participantReplyRequiresAttention",
+            "headers": {
+              "x-conversation-event-id": "01a0215c-8aa5-7d3d-a5c8-fe68139447c7",
+              "x-conversation-event-schema-version": "1"
+            },
+            "payload": {
+              "schemaVersion": 1,
+              "id": "01a0215c-8aa5-7d3d-a5c8-fe68139447c7",
+              "type": "conversation.state.changed",
+              "occurredAt": "2026-08-20T22:48:24.978Z",
+              "conversationId": "01a0192e-efb8-7725-abda-3bec284104ea",
+              "sequence": 4,
+              "topic": {
+                "type": "booking",
+                "externalId": "booking-4821"
+              },
+              "actor": "participant",
+              "cause": "inbound_email",
+              "state": {
+                "from": "awaiting_participant",
+                "to": "awaiting_us"
+              }
+            }
+          }
+        ]
+      },
+      "conversationAssigned": {
+        "name": "conversation.assigned",
+        "title": "Conversation assigned",
+        "summary": "An operator assigned an unassigned conversation to an external topic.",
+        "payload": {
+          "$ref": "#/components/schemas/ConversationAssignedEvent"
+        },
+        "traits": [{ "$ref": "#/components/messageTraits/conversationEvent" }],
+        "examples": [
+          {
+            "name": "conversationAssignedToBooking",
+            "headers": {
+              "x-conversation-event-id": "01a02160-0000-7000-8000-000000000001",
+              "x-conversation-event-schema-version": "1"
+            },
+            "payload": {
+              "schemaVersion": 1,
+              "id": "01a02160-0000-7000-8000-000000000001",
+              "type": "conversation.assigned",
+              "occurredAt": "2026-08-20T23:00:00.000Z",
+              "conversationId": "01a0192e-efb8-7725-abda-3bec284104ea",
+              "sequence": 5,
+              "topic": {
+                "type": "booking",
+                "externalId": "booking-4821"
+              },
+              "actor": "operator",
+              "cause": "topic_assignment"
+            }
+          }
+        ]
+      },
+      "conversationMessageDeliveryUpdated": {
+        "name": "conversation.message.delivery.updated",
+        "title": "Conversation message delivery updated",
+        "summary": "A Resend webhook changed the projected delivery state of an outbound conversation message.",
+        "payload": {
+          "$ref": "#/components/schemas/ConversationMessageDeliveryUpdatedEvent"
+        },
+        "traits": [{ "$ref": "#/components/messageTraits/conversationEvent" }],
+        "examples": [
+          {
+            "name": "outboundMessageDelivered",
+            "headers": {
+              "x-conversation-event-id": "01a02154-dedc-717f-ab04-21e49f444004",
+              "x-conversation-event-schema-version": "1"
+            },
+            "payload": {
+              "schemaVersion": 1,
+              "id": "01a02154-dedc-717f-ab04-21e49f444004",
+              "type": "conversation.message.delivery.updated",
+              "occurredAt": "2026-08-20T22:40:03.858Z",
+              "conversationId": "01a0192e-efb8-7725-abda-3bec284104ea",
+              "sequence": 2,
+              "topic": {
+                "type": "booking",
+                "externalId": "booking-4821"
+              },
+              "messageId": "01a02151-839a-728c-ad30-6b65bf4038bf",
+              "actor": "system",
+              "cause": "resend_delivery_webhook",
+              "deliveryState": "delivered"
+            }
+          }
+        ]
+      },
+      "conversationMerged": {
+        "name": "conversation.merged",
+        "title": "Conversation merged",
+        "summary": "Thread reconciliation merged conversation rows.",
+        "description": "A source-conversation event includes mergedIntoConversationId. The corresponding survivor-conversation event omits it.",
+        "payload": {
+          "$ref": "#/components/schemas/ConversationMergedEvent"
+        },
+        "traits": [{ "$ref": "#/components/messageTraits/conversationEvent" }],
+        "examples": [
+          {
+            "name": "sourceConversationMerged",
+            "headers": {
+              "x-conversation-event-id": "01a02161-0000-7000-8000-000000000001",
+              "x-conversation-event-schema-version": "1"
+            },
+            "payload": {
+              "schemaVersion": 1,
+              "id": "01a02161-0000-7000-8000-000000000001",
+              "type": "conversation.merged",
+              "occurredAt": "2026-08-20T23:05:00.000Z",
+              "conversationId": "01a0192e-efb8-7725-abda-3bec284104ea",
+              "sequence": 6,
+              "topic": null,
+              "actor": "system",
+              "cause": "thread_reconciliation",
+              "mergedIntoConversationId": "01a0192e-efb8-7725-abda-3bec284104eb"
+            }
+          },
+          {
+            "name": "survivorConversationRecordedMerge",
+            "headers": {
+              "x-conversation-event-id": "01a02161-0000-7000-8000-000000000002",
+              "x-conversation-event-schema-version": "1"
+            },
+            "payload": {
+              "schemaVersion": 1,
+              "id": "01a02161-0000-7000-8000-000000000002",
+              "type": "conversation.merged",
+              "occurredAt": "2026-08-20T23:05:00.000Z",
+              "conversationId": "01a0192e-efb8-7725-abda-3bec284104eb",
+              "sequence": 7,
+              "topic": {
+                "type": "booking",
+                "externalId": "booking-4821"
+              },
+              "actor": "system",
+              "cause": "thread_reconciliation"
+            }
+          }
+        ]
+      }
+    },
+    "messageTraits": {
+      "conversationEvent": {
+        "contentType": "application/json",
+        "headers": {
+          "$ref": "#/components/schemas/ConversationEventHeaders"
+        },
+        "bindings": {
+          "kafka": {
+            "key": {
+              "$ref": "#/components/schemas/ConversationId"
+            },
+            "bindingVersion": "0.5.0"
+          },
+          "nats": {}
+        }
+      }
+    },
+    "schemas": {
+      "ConversationId": {
+        "type": "string",
+        "format": "uuid",
+        "description": "Internal UUIDv7 conversation identifier."
+      },
+      "EventId": {
+        "type": "string",
+        "format": "uuid",
+        "description": "Globally unique UUIDv7 event identifier used for deduplication."
+      },
+      "MessageId": {
+        "type": "string",
+        "format": "uuid",
+        "description": "Internal UUIDv7 conversation-message identifier."
+      },
+      "Topic": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "externalId"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "externalId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          }
+        }
+      },
+      "NullableTopic": {
+        "oneOf": [{ "$ref": "#/components/schemas/Topic" }, { "type": "null" }]
+      },
+      "ConversationState": {
+        "type": "string",
+        "enum": [
+          "awaiting_us",
+          "awaiting_participant",
+          "concluded",
+          "terminated"
+        ]
+      },
+      "StateTransition": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["from", "to"],
+        "properties": {
+          "from": {
+            "oneOf": [
+              { "$ref": "#/components/schemas/ConversationState" },
+              { "type": "null" }
+            ]
+          },
+          "to": {
+            "$ref": "#/components/schemas/ConversationState"
+          }
+        }
+      },
+      "DeliveryState": {
+        "type": "string",
+        "enum": [
+          "delivered",
+          "delivery_delayed",
+          "bounced",
+          "complained",
+          "suppressed",
+          "failed"
+        ]
+      },
+      "ConversationEventHeaders": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "x-conversation-event-id",
+          "x-conversation-event-schema-version"
+        ],
+        "properties": {
+          "x-conversation-event-id": {
+            "$ref": "#/components/schemas/EventId"
+          },
+          "x-conversation-event-schema-version": {
+            "type": "string",
+            "const": "1"
+          }
+        }
+      },
+      "ConversationCreatedEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schemaVersion",
+          "id",
+          "type",
+          "occurredAt",
+          "conversationId",
+          "sequence",
+          "topic",
+          "actor",
+          "cause"
+        ],
+        "properties": {
+          "schemaVersion": { "type": "integer", "const": 1 },
+          "id": { "$ref": "#/components/schemas/EventId" },
+          "type": { "type": "string", "const": "conversation.created" },
+          "occurredAt": { "type": "string", "format": "date-time" },
+          "conversationId": { "$ref": "#/components/schemas/ConversationId" },
+          "sequence": { "type": "integer", "minimum": 1 },
+          "topic": { "$ref": "#/components/schemas/NullableTopic" },
+          "actor": {
+            "type": "string",
+            "enum": ["participant", "service"]
+          },
+          "cause": {
+            "type": "string",
+            "enum": ["inbound_email", "outbound_intent"]
+          }
+        },
+        "allOf": [
+          {
+            "oneOf": [
+              {
+                "properties": {
+                  "actor": { "const": "participant" },
+                  "cause": { "const": "inbound_email" }
+                }
+              },
+              {
+                "properties": {
+                  "actor": { "const": "service" },
+                  "cause": { "const": "outbound_intent" }
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "ConversationMessageReceivedEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schemaVersion",
+          "id",
+          "type",
+          "occurredAt",
+          "conversationId",
+          "sequence",
+          "topic",
+          "messageId",
+          "actor",
+          "cause"
+        ],
+        "properties": {
+          "schemaVersion": { "type": "integer", "const": 1 },
+          "id": { "$ref": "#/components/schemas/EventId" },
+          "type": {
+            "type": "string",
+            "const": "conversation.message.received"
+          },
+          "occurredAt": { "type": "string", "format": "date-time" },
+          "conversationId": { "$ref": "#/components/schemas/ConversationId" },
+          "sequence": { "type": "integer", "minimum": 1 },
+          "topic": { "$ref": "#/components/schemas/NullableTopic" },
+          "messageId": { "$ref": "#/components/schemas/MessageId" },
+          "actor": { "type": "string", "const": "participant" },
+          "cause": { "type": "string", "const": "inbound_email" }
+        }
+      },
+      "ConversationMessageOutboundIntendedEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schemaVersion",
+          "id",
+          "type",
+          "occurredAt",
+          "conversationId",
+          "sequence",
+          "topic",
+          "messageId",
+          "actor",
+          "cause"
+        ],
+        "properties": {
+          "schemaVersion": { "type": "integer", "const": 1 },
+          "id": { "$ref": "#/components/schemas/EventId" },
+          "type": {
+            "type": "string",
+            "const": "conversation.message.outbound.intended"
+          },
+          "occurredAt": { "type": "string", "format": "date-time" },
+          "conversationId": { "$ref": "#/components/schemas/ConversationId" },
+          "sequence": { "type": "integer", "minimum": 1 },
+          "topic": { "$ref": "#/components/schemas/NullableTopic" },
+          "messageId": { "$ref": "#/components/schemas/MessageId" },
+          "actor": { "type": "string", "const": "service" },
+          "cause": {
+            "type": "string",
+            "enum": ["outbox_enqueue", "synchronous_send"]
+          }
+        }
+      },
+      "ConversationStateChangedEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schemaVersion",
+          "id",
+          "type",
+          "occurredAt",
+          "conversationId",
+          "sequence",
+          "topic",
+          "actor",
+          "cause",
+          "state"
+        ],
+        "properties": {
+          "schemaVersion": { "type": "integer", "const": 1 },
+          "id": { "$ref": "#/components/schemas/EventId" },
+          "type": { "type": "string", "const": "conversation.state.changed" },
+          "occurredAt": { "type": "string", "format": "date-time" },
+          "conversationId": { "$ref": "#/components/schemas/ConversationId" },
+          "sequence": { "type": "integer", "minimum": 1 },
+          "topic": { "$ref": "#/components/schemas/NullableTopic" },
+          "actor": {
+            "type": "string",
+            "enum": ["participant", "service", "operator", "system"]
+          },
+          "cause": {
+            "type": "string",
+            "enum": [
+              "inbound_email",
+              "outbound_intent",
+              "manual_override",
+              "unreachable_delivery"
+            ]
+          },
+          "state": { "$ref": "#/components/schemas/StateTransition" }
+        },
+        "allOf": [
+          {
+            "oneOf": [
+              {
+                "properties": {
+                  "actor": { "const": "participant" },
+                  "cause": { "const": "inbound_email" }
+                }
+              },
+              {
+                "properties": {
+                  "actor": { "const": "service" },
+                  "cause": { "const": "outbound_intent" }
+                }
+              },
+              {
+                "properties": {
+                  "actor": { "const": "operator" },
+                  "cause": { "const": "manual_override" }
+                }
+              },
+              {
+                "properties": {
+                  "actor": { "const": "system" },
+                  "cause": { "const": "unreachable_delivery" }
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "ConversationAssignedEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schemaVersion",
+          "id",
+          "type",
+          "occurredAt",
+          "conversationId",
+          "sequence",
+          "topic",
+          "actor",
+          "cause"
+        ],
+        "properties": {
+          "schemaVersion": { "type": "integer", "const": 1 },
+          "id": { "$ref": "#/components/schemas/EventId" },
+          "type": { "type": "string", "const": "conversation.assigned" },
+          "occurredAt": { "type": "string", "format": "date-time" },
+          "conversationId": { "$ref": "#/components/schemas/ConversationId" },
+          "sequence": { "type": "integer", "minimum": 1 },
+          "topic": { "$ref": "#/components/schemas/Topic" },
+          "actor": { "type": "string", "const": "operator" },
+          "cause": { "type": "string", "const": "topic_assignment" }
+        }
+      },
+      "ConversationMessageDeliveryUpdatedEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schemaVersion",
+          "id",
+          "type",
+          "occurredAt",
+          "conversationId",
+          "sequence",
+          "topic",
+          "messageId",
+          "actor",
+          "cause",
+          "deliveryState"
+        ],
+        "properties": {
+          "schemaVersion": { "type": "integer", "const": 1 },
+          "id": { "$ref": "#/components/schemas/EventId" },
+          "type": {
+            "type": "string",
+            "const": "conversation.message.delivery.updated"
+          },
+          "occurredAt": { "type": "string", "format": "date-time" },
+          "conversationId": { "$ref": "#/components/schemas/ConversationId" },
+          "sequence": { "type": "integer", "minimum": 1 },
+          "topic": { "$ref": "#/components/schemas/NullableTopic" },
+          "messageId": { "$ref": "#/components/schemas/MessageId" },
+          "actor": { "type": "string", "const": "system" },
+          "cause": { "type": "string", "const": "resend_delivery_webhook" },
+          "deliveryState": { "$ref": "#/components/schemas/DeliveryState" }
+        }
+      },
+      "ConversationMergedEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schemaVersion",
+          "id",
+          "type",
+          "occurredAt",
+          "conversationId",
+          "sequence",
+          "topic",
+          "actor",
+          "cause"
+        ],
+        "properties": {
+          "schemaVersion": { "type": "integer", "const": 1 },
+          "id": { "$ref": "#/components/schemas/EventId" },
+          "type": { "type": "string", "const": "conversation.merged" },
+          "occurredAt": { "type": "string", "format": "date-time" },
+          "conversationId": { "$ref": "#/components/schemas/ConversationId" },
+          "sequence": { "type": "integer", "minimum": 1 },
+          "topic": { "$ref": "#/components/schemas/NullableTopic" },
+          "actor": { "type": "string", "const": "system" },
+          "cause": { "type": "string", "const": "thread_reconciliation" },
+          "mergedIntoConversationId": {
+            "$ref": "#/components/schemas/ConversationId"
+          }
+        },
+        "oneOf": [
+          { "required": ["mergedIntoConversationId"] },
+          { "not": { "required": ["mergedIntoConversationId"] } }
+        ]
+      }
+    }
+  }
+}

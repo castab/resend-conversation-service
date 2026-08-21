@@ -8,7 +8,7 @@
     "npm": ">=10"
   },
   "scripts": {
-    "api:validate": "redocly lint public/openapi.json",
+    "api:validate": "redocly lint public/openapi.json && asyncapi validate public/asyncapi.json",
     "dev": "tsx watch src/server.ts",
     "dev:test": "dotenv -e .env.test -- tsx watch src/server.ts",
     "build": "npm run db:generate && tsc --project tsconfig.build.json && esbuild src/server.ts --bundle --platform=node --target=node22 --format=esm --packages=external --outfile=dist/server.js",
@@ -38,6 +38,7 @@
     "swagger-ui-dist": "5.32.1"
   },
   "devDependencies": {
+    "@asyncapi/cli": "5.0.7",
     "@biomejs/biome": "2.3.11",
     "@redocly/cli": "2.39.0",
     "@types/express": "5.0.6",

@@ -209,6 +209,12 @@ export function createApp() {
       (error) => error && next(error),
     );
   });
+  app.get('/asyncapi.json', (_request, response, next) => {
+    response.sendFile(
+      path.resolve('public/asyncapi.json'),
+      (error) => error && next(error),
+    );
+  });
   app.use(
     '/docs/assets',
     express.static(swaggerUiDist.getAbsoluteFSPath(), { fallthrough: false }),
