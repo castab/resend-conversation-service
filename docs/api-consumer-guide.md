@@ -29,6 +29,11 @@ removed in 0.6.0 and returns `404 {"error":"Not found"}`. Resend webhook
 ingress remains `/api/webhooks/resend/v1`; its V1 path is unrelated to the
 conversation API retirement.
 
+Use the deployed `/openapi.json` contract for HTTP and `/asyncapi.json` for the
+optional NATS or Kafka conversation event feed. Both contracts carry the same
+service package version. The event payload schema version is a separate field
+and is currently `1`.
+
 ## Authentication
 
 ### Conversation API V2
@@ -433,6 +438,80 @@ Out-of-order inbound reconciliation can merge rows later discovered to represent
 
 Inbound retrieval or projection failure returns `500` so Resend can retry. Outbound delivery state is projected by Resend email ID.
 
+## Conversation event feed
+
+When enabled by the service operator, the service publishes compact
+conversation lifecycle events to NATS JetStream, Kafka, or both. Direct email
+does not emit these events. The feed contains identifiers and lifecycle
+metadata only: it does not contain addresses, names, subjects, message bodies,
+headers from email, or raw Resend payloads. Use an authorized conversation GET
+operation when an event consumer needs current conversation or message data.
+
+The machine-readable contract is the AsyncAPI 3.1 document at
+`GET /asyncapi.json`. Broker endpoints, subscriber credentials, NATS stream
+names, and final subject or topic names are deployment-owned. The documented
+defaults are `conversation.events.v1` for the NATS subject and
+`conversation-events-v1` for the Kafka topic.
+
+Every event has these required payload fields:
+
+| Field | Meaning |
+| --- | --- |
+| `schemaVersion` | Integer payload contract version; currently exactly `1` |
+| `id` | UUIDv7 event ID and consumer deduplication key |
+| `type` | Discriminator for one of the seven event schemas |
+| `occurredAt` | Time the represented state change or intent occurred, not publication time |
+| `conversationId` | UUIDv7 conversation ID used for reads and ordering |
+| `sequence` | Monotonic integer within one conversation |
+| `topic` | `{type, externalId}` when assigned, otherwise null |
+| `actor` | `participant`, `service`, `operator`, or `system`, as constrained by the event schema |
+| `cause` | Closed event-specific reason code |
+
+Event-specific fields and causes are:
+
+| `type` | Additional field | Actor and cause |
+| --- | --- | --- |
+| `conversation.created` | None | `participant` / `inbound_email` or `service` / `outbound_intent` |
+| `conversation.message.received` | `messageId` | `participant` / `inbound_email` |
+| `conversation.message.outbound.intended` | `messageId` | `service` / `synchronous_send` or `outbox_enqueue` |
+| `conversation.state.changed` | `state: {from, to}` | Participant inbound, service outbound intent, operator manual override, or system unreachable delivery |
+| `conversation.assigned` | Non-null `topic` | `operator` / `topic_assignment` |
+| `conversation.message.delivery.updated` | `messageId`, `deliveryState` | `system` / `resend_delivery_webhook` |
+| `conversation.merged` | Source events include `mergedIntoConversationId`; the survivor event omits it | `system` / `thread_reconciliation` |
+
+`state.from` may be null and state values are `awaiting_us`,
+`awaiting_participant`, `concluded`, or `terminated`. `deliveryState` is one of
+`delivered`, `delivery_delayed`, `bounced`, `complained`, `suppressed`, or
+`failed`.
+
+Both transports carry application headers
+`x-conversation-event-id` and
+`x-conversation-event-schema-version`. The event-ID header equals payload `id`;
+the schema-version header is the string `"1"`. Kafka serializes the payload as
+the record value and uses `conversationId` as the record key. NATS JetStream
+sets the protocol-defined `Nats-Msg-Id` to the event ID. The JSON payload is
+otherwise identical when both sinks are enabled, and each sink is delivered
+and retried independently.
+
+Delivery is at least once. Consumers must:
+
+1. Reject or quarantine an unsupported `schemaVersion` before dispatching on
+   `type`.
+2. Deduplicate globally by `id`, including duplicates observed after a retry.
+3. Process one conversation by ascending `sequence`; do not infer ordering
+   between different conversations from broker or publication time.
+4. Tolerate a stream beginning above sequence 1 and apparent gaps. Events are
+   created only while at least one sink is enabled, and enabling an additional
+   sink does not backfill events already committed for another sink.
+5. Treat an unknown event type or extra field as a contract mismatch under the
+   closed schema-v1 contract rather than silently guessing its meaning.
+6. Make handlers idempotent because the event and downstream side effects may
+   be replayed.
+
+An incompatible field, value, or event-kind change requires a future payload
+schema version and a new versioned subject or topic. Consumers should not treat
+the service package version as the event payload schema version.
+
 ## Integration setup
 
 Consumers need the deployed base URL and the credential for their route family. Operators of the service configure:
@@ -443,6 +522,10 @@ Consumers need the deployed base URL and the credential for their route family. 
 - `RESEND_REPLY_TO` as the Reply-To base for inbound routing-token validation
 - `EMAIL_v2_API_KEY`, or `EMAIL_V2_API_KEY` as a fallback
 - `OUTBOX_DRAIN_API_KEY` for the shared drain
+
+Event consumers additionally need deployment-provided NATS or Kafka connection
+details and subscriber credentials. Those credentials are independent of the
+HTTP bearer credentials and are not defined by this service contract.
 
 V2 additionally requires database allowlist rows for each approved canonical address and role. Keep allowlist changes in controlled database administration; no application management API exists.
 
@@ -489,6 +572,7 @@ curl -i \
 
 - Current conversation API: V2. Conversation API V1 was retired in 0.5.0 and its paths return `404`.
 - OpenAPI version: `3.1.1`.
+- AsyncAPI version: `3.1.0`; conversation event payload schema version: `1`.
 - Contract/package version observed in repository: `0.7.0-rc.2`.
 - No browser-safe authentication or correlation/request ID is defined.
 - Gateway exposure policy is deployment-owned and not included in this contract.

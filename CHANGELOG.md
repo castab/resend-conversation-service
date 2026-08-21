@@ -8,6 +8,21 @@ and this project uses [Semantic Versioning](https://semver.org/). See
 
 ## [Unreleased]
 
+### Added
+
+- Added an AsyncAPI 3.1 contract for all seven conversation lifecycle event
+  types and exposed it at the unauthenticated `/asyncapi.json` documentation
+  endpoint.
+
+### Changed
+
+- Expanded API validation, release metadata checks, consumer documentation,
+  and the repository API integration skill to keep HTTP and broker contracts
+  synchronized.
+- Defaulted destructive integration tests to the dedicated local Docker
+  Compose `resend_test` database when `TEST_DATABASE_URL` is not provided,
+  without falling back to `DATABASE_URL`.
+
 ## [0.7.0-rc.2] - 2026-08-20
 
 ### Fixed

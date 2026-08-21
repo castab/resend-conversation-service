@@ -115,12 +115,18 @@
 
 ## Contracts And Tests
 
-- Keep `public/openapi.json` aligned with every route or behavior change.
+- Keep `public/openapi.json` aligned with every HTTP route or behavior change
+  and `public/asyncapi.json` aligned with every conversation event or transport
+  change.
+- Treat OpenAPI and AsyncAPI as one consumer-facing interface suite. Keep their
+  `info.version` values aligned with the repository version.
 - Preserve the V2 contract and the explicit webhook and outbox-drain security
   overrides in OpenAPI. `emailV2Auth` is the spec-wide default; do not
   reintroduce a `bearerAuth` scheme.
-- Integration tests require a dedicated disposable `TEST_DATABASE_URL` and
-  truncate application tables.
+- Integration tests use an explicit `TEST_DATABASE_URL` when provided;
+  otherwise they use the dedicated local Docker Compose `resend_test` database
+  at `postgresql://postgres:postgres@localhost:5432/resend_test`. They truncate
+  application tables and must never fall back to `DATABASE_URL`.
 - Keep test files serial while they share PostgreSQL and the fake Resend server.
 - Describe pull requests with the sections in
   [.github/pull_request_template.md](.github/pull_request_template.md), dropping

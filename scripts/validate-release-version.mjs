@@ -30,6 +30,7 @@ function extractObservedVersion(markdown) {
 const packageJson = readJson('package.json');
 const packageLock = readJson('package-lock.json');
 const openapi = readJson('public/openapi.json');
+const asyncapi = readJson('public/asyncapi.json');
 const consumerGuide = readFileSync(
   resolve(root, 'docs/api-consumer-guide.md'),
   'utf8',
@@ -48,6 +49,7 @@ const versions = new Map([
   ['package-lock.json', packageLock.version],
   ["package-lock.json packages['']", packageLock.packages?.[''].version],
   ['public/openapi.json', openapi.info?.version],
+  ['public/asyncapi.json', asyncapi.info?.version],
   ['docs/api-consumer-guide.md', extractObservedVersion(consumerGuide)],
 ]);
 

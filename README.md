@@ -33,7 +33,8 @@ Authorized callers
 ```
 
 The single process shares one Prisma client, deployment lifecycle, health
-check, OpenAPI contract, Docker image, and Railway service configuration.
+check, OpenAPI and AsyncAPI contracts, Docker image, and Railway service
+configuration.
 
 ## Repository Layout
 
@@ -41,6 +42,7 @@ check, OpenAPI contract, Docker image, and Railway service configuration.
 .github/                # CI workflows and the pull request template
 prisma/                 # Prisma schema and immutable migration history
 public/openapi.json     # Unified OpenAPI contract
+public/asyncapi.json    # NATS and Kafka conversation event contract
 src/routes/                # Express routes and Swagger UI
 src/lib/database/       # Prisma client construction and exports
 src/lib/email/          # Resend client, webhook types, projection, threading
@@ -70,13 +72,14 @@ POST  /api/conversations/v2/{conversationId}/messages/outbox
 GET   /api/conversations/v2/topics/{topicType}/{externalTopicId}
 GET   /docs
 GET   /openapi.json
+GET   /asyncapi.json
 ```
 
 The unauthenticated readiness endpoint is `/api/health/v2`.
 `/api/health/v1` is retired and returns `404`. The webhook requires a valid
 signature over the exact raw body and all three Svix headers. Conversation
 operations and direct email require `EMAIL_v2_API_KEY` (or `EMAIL_V2_API_KEY`
-as a fallback). Both outbox drain routes use `OUTBOX_DRAIN_API_KEY`. Sending
+as a fallback). The shared outbox drain route uses `OUTBOX_DRAIN_API_KEY`. Sending
 and enqueueing operations also require `Idempotency-Key`.
 
 `POST /api/webhooks/resend/v1` remains the supported long-term Resend webhook
@@ -222,6 +225,15 @@ initial event types are conversation creation, inbound and outbound message
 lifecycle, state changes, assignment, delivery updates, and merges. Enabling a
 sink starts delivery only for events committed after that sink becomes active.
 
+The complete event contract is the AsyncAPI 3.1 document at
+`GET /asyncapi.json`. It defines all seven closed `schemaVersion: 1` payloads,
+their headers and examples, the Kafka conversation-ID record key, and the NATS
+JetStream message-ID behavior. NATS and Kafka receive the same payload and
+event ID through independent delivery records. Consumers should dispatch on
+`type`, reject unsupported schema versions, deduplicate by `id`, and order work
+within each `conversationId` by `sequence`. A newly enabled sink may begin
+after earlier sequence values and does not receive a backfill.
+
 Every Reply-To base must be a plain mailbox on a Resend Receiving domain, without a display name or an
 existing `+` tag. Resend must accept every generated
 `mailbox+c_<token>@domain` address. Keep a conversation's base stable while its
@@ -320,6 +332,12 @@ EMAIL_v2_API_KEY=test-conversation-v2-api-key
 OUTBOX_DRAIN_API_KEY=test-outbox-drain-api-key
 APP_BASE_URL=http://localhost:3000
 ```
+
+`TEST_DATABASE_URL` may be omitted for local tests. The test harness defaults
+to the disposable `resend_test` database exposed by `docker-compose.yml` at
+`postgresql://postgres:postgres@localhost:5432/resend_test`. An explicit value
+still takes precedence, including in CI. The test harness never falls back to
+`DATABASE_URL` because integration tests truncate application tables.
 
 Prepare the database and start the test application:
 

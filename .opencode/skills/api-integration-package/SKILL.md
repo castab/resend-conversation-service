@@ -1,6 +1,6 @@
 ---
 name: api-integration-package
-description: OpenAPI, api-consumer-guide.md, api-agent-handoff.md, contract extraction, integration guide, API handoff. Use ONLY when updating this repository's consumer-facing API contract and integration documentation from the implemented behavior.
+description: OpenAPI, AsyncAPI, consumer guide, agent handoff, contract extraction, and interface reconciliation. Use ONLY when updating this repository's consumer-facing HTTP or conversation-event integration package from implemented behavior.
 ---
 
 # API Integration Package
@@ -8,6 +8,7 @@ description: OpenAPI, api-consumer-guide.md, api-agent-handoff.md, contract extr
 Use this skill only for `resend-conversation-service` when the task is to research and update the consumer-facing API package:
 
 - `public/openapi.json`
+- `public/asyncapi.json`
 - `docs/api-consumer-guide.md`
 - `docs/api-agent-handoff.md`
 
@@ -28,6 +29,7 @@ Inspect these first:
 - `package.json`
 - `.env.example`
 - `public/openapi.json`
+- `public/asyncapi.json`
 - `docs/api-consumer-guide.md`
 - `docs/api-agent-handoff.md`
 - `src/server.ts`
@@ -36,6 +38,8 @@ Inspect these first:
 - `src/lib/send-validation.ts`
 - `src/lib/conversation-service.ts`
 - `src/lib/conversation-v2.ts`
+- `src/lib/conversation-events.ts`
+- `src/lib/conversation-event-runtime.ts`
 - `src/lib/outbox-service.ts`
 - `src/lib/webhook-handler.ts`
 - `src/lib/verify-webhook.ts`
@@ -61,6 +65,12 @@ Inspect these first:
 6. Preserve the contract as strict public behavior when implementation is more permissive. Record the mismatch in the guides instead of broadening the contract without evidence.
 7. Treat unknown framework-generated failures as unresolved if the application does not control the response body.
 8. Keep copied consumer-facing docs portable. Do not require downstream readers to have this repository's local scripts, Docker Compose setup, OpenCode skills, or command files.
+9. Treat HTTP and broker contracts as one versioned interface suite. Keep the
+   package, OpenAPI, AsyncAPI, and consumer-guide versions aligned while keeping
+   the event payload `schemaVersion` concept separate.
+10. For strict event schemas, do not widen fields, actor/cause combinations, or
+    enumerations beyond values emitted by reachable code paths. Incompatible
+    event changes require a new payload schema version and versioned channel.
 
 ## Workflow
 
@@ -92,11 +102,16 @@ and migration guidance. `GET /api/health/v1` was removed in 0.6.0;
 
 Required V2 route inventory:
 
+- `POST /api/emails/v2`
+- `POST /api/emails/v2/outbox`
+- `POST /api/emails/v2/outbox/drain`
 - `POST /api/conversations/v2`
 - `GET /api/conversations/v2?assignment=unassigned`
+- `GET /api/conversations/v2/summary`
 - `POST /api/conversations/v2/outbox`
 - `GET /api/conversations/v2/{conversationId}`
 - `PATCH /api/conversations/v2/{conversationId}`
+- `POST /api/conversations/v2/{conversationId}/state`
 - `POST /api/conversations/v2/{conversationId}/messages`
 - `POST /api/conversations/v2/{conversationId}/messages/outbox`
 - `GET /api/conversations/v2/topics/{topicType}/{externalTopicId}`
@@ -108,7 +123,26 @@ schema or migration, and integration-test evidence. Record shared and
 route-specific behavior explicitly rather than assuming that equivalent route
 shapes have equivalent contracts.
 
-Do not add `/docs` or `/openapi.json` to the OpenAPI contract. They may be referenced in guides only as supporting resources.
+Do not add `/docs`, `/openapi.json`, or `/asyncapi.json` to the OpenAPI
+contract. They may be referenced in guides only as supporting resources.
+
+Build a conversation-event evidence matrix for every event emitted through
+`appendConversationEvent`. Capture:
+
+- Serialized `type`
+- Trigger and transaction boundary
+- Required, optional, and nullable payload fields
+- Exact actor/cause combinations and enumerations
+- NATS headers and JetStream message ID behavior
+- Kafka headers and record-key behavior
+- Delivery, deduplication, ordering, retry, and backfill semantics
+- Test coverage and gaps
+
+Trace every call site in conversation V2 writes, inbound projection, delivery
+projection, assignment, state override, and merge reconciliation. Use
+`src/lib/conversation-events.ts` for payload construction and
+`src/lib/conversation-event-runtime.ts` for wire behavior. Do not infer event
+guarantees solely from database table names or README prose.
 
 ### 2. Reconcile the contract
 
@@ -126,6 +160,22 @@ Include:
 - Shared error schemas and responses
 
 Do not encode implementation-only leniency as a public guarantee unless the repository already treats it as supported. Example: if runtime clamps invalid query limits instead of rejecting them, keep the strict contract and document the discrepancy in the guides.
+
+Update `public/asyncapi.json` so it matches the supported event feed.
+
+Include:
+
+- NATS and Kafka servers, configurable channel addresses, and send operations
+- Every supported event as a uniquely discriminated message
+- Closed payload schemas, common application headers, and valid examples
+- Kafka record-key and NATS JetStream message-ID behavior
+- At-least-once delivery, event-ID deduplication, per-conversation sequence,
+  independent sinks, and no-backfill guidance
+
+Keep the shared JSON payload schema transport-neutral. Describe protocol
+envelopes with bindings or channel/operation descriptions instead of adding
+transport-only fields to the payload. Subscriber endpoints and credentials are
+deployment-owned; do not copy secrets or invent deployment-specific values.
 
 ### 3. Update the consumer guide
 
@@ -145,6 +195,7 @@ It must explain:
 - Compatibility and versioning
 - Environment and integration setup from the consumer perspective
 - Consumer examples
+- Broker event types, envelopes, dispatch, deduplication, and ordering guidance
 - Known gaps and unresolved questions
 
 When implementation and contract disagree, say so explicitly.
@@ -165,6 +216,7 @@ Include:
 - Key constraints
 - Retry/idempotency rules
 - Consumer integration checklist or handoff guidance
+- Event-feed schema and transport summary when conversation events are present
 - Unresolved issues
 
 Do not include repository-local skill paths, command paths, validation
@@ -176,13 +228,19 @@ handoff must still make sense after being copied into a different repository.
 Run these with explicit timeouts because long-running processes are known to hang on this machine:
 
 ```bash
+npm run release:validate
 npm run db:validate
 npm run api:validate
+npm test
 npm run lint
 npm run build
 ```
 
-For integration tests, confirm the test database is disposable before running:
+For integration tests, confirm the test database is disposable before running.
+`TEST_DATABASE_URL` overrides the test target. When it is absent, the harness
+uses the local Docker Compose database at
+`postgresql://postgres:postgres@localhost:5432/resend_test`; it never falls back
+to `DATABASE_URL`.
 
 ```bash
 npm run db:setup
@@ -194,7 +252,8 @@ Notes:
 
 - `db:setup` uses Prisma CLI and reads `.env`.
 - `dev:test` explicitly loads `.env.test`.
-- Ensure the disposable database configuration is available to both before running destructive tests.
+- Ensure `db:setup` and the test harness target the same disposable database
+  before running destructive tests.
 - Always apply explicit tool timeouts to shell commands in this repository.
 
 These validation commands are for the agent updating this repository. They are
@@ -206,8 +265,9 @@ At the end, report:
 
 - Files changed
 - Workflows documented
+- Event types and transports documented
 - Commands run and results
-- Confirmed contract/implementation discrepancies
+- Confirmed HTTP or event contract/implementation discrepancies
 - What could not be validated
 
 ## Non-Goals
