@@ -1,6 +1,6 @@
 # API Consumer Guide
 
-Contract version: `0.7.0-rc.2`
+Contract version: `0.7.0-rc.3`
 
 ## Service purpose
 
@@ -573,7 +573,7 @@ curl -i \
 - Current conversation API: V2. Conversation API V1 was retired in 0.5.0 and its paths return `404`.
 - OpenAPI version: `3.1.1`.
 - AsyncAPI version: `3.1.0`; conversation event payload schema version: `1`.
-- Contract/package version observed in repository: `0.7.0-rc.2`.
+- Contract/package version observed in repository: `0.7.0-rc.3`.
 - No browser-safe authentication or correlation/request ID is defined.
 - Gateway exposure policy is deployment-owned and not included in this contract.
 - Topic lookup does not enforce the documented 255-character `externalTopicId` limit although create and assignment do; consumers must follow the stricter contract.
@@ -582,3 +582,4 @@ curl -i \
 - Runtime accepts trimmed, case-insensitive state values for the manual state route; use the lowercase OpenAPI enum values as the supported contract.
 - Manual state writes reset `stateChangedAt` even on a no-op repeat; automatic mail-flow transitions update it only when the state changes.
 - Integration coverage confirms credential separation, structured identity validation, role separation, generic rejection, alias preservation, promotion of `V1`-tagged conversations, allowlist revocation behavior, fixed Reply-To base behavior, and token-based inbound routing.
+
