@@ -582,4 +582,3 @@ curl -i \
 - Runtime accepts trimmed, case-insensitive state values for the manual state route; use the lowercase OpenAPI enum values as the supported contract.
 - Manual state writes reset `stateChangedAt` even on a no-op repeat; automatic mail-flow transitions update it only when the state changes.
 - Integration coverage confirms credential separation, structured identity validation, role separation, generic rejection, alias preservation, promotion of `V1`-tagged conversations, allowlist revocation behavior, fixed Reply-To base behavior, and token-based inbound routing.
-
