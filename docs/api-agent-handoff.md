@@ -1,10 +1,14 @@
 # API Agent Handoff
 
-Contract version: `0.6.0`
+Contract version: `0.7.0-rc.2`
 
 ## Sources
 
-Use the upstream `openapi.json`, consumer guide, release notes, and versioned service artifact as the integration sources of truth. This handoff is portable and assumes no access to the service repository, its scripts, or local agent configuration.
+Use the upstream `openapi.json`, `asyncapi.json`, consumer guide, release notes,
+and versioned service artifact as the integration sources of truth. OpenAPI
+covers HTTP; AsyncAPI covers the optional NATS and Kafka conversation event
+feed. This handoff is portable and assumes no access to the service repository,
+its scripts, or local agent configuration.
 
 ## Version selection
 
@@ -83,6 +87,37 @@ The complete route layout:
 `GET /api/health/v2` is unauthenticated and provides readiness behavior.
 `GET /api/health/v1` was removed in 0.6.0 and returns `404 {"error":"Not found"}`.
 `POST /api/webhooks/resend/v1` is Svix-authenticated.
+`GET /openapi.json` and `GET /asyncapi.json` are unauthenticated contract
+resources and are not application operations in OpenAPI.
+
+## Conversation events
+
+The optional event feed publishes the same closed `schemaVersion: 1` JSON
+payload to a configured NATS JetStream subject, Kafka topic, or both. It emits
+seven types:
+
+- `conversation.created`
+- `conversation.message.received`
+- `conversation.message.outbound.intended`
+- `conversation.state.changed`
+- `conversation.assigned`
+- `conversation.message.delivery.updated`
+- `conversation.merged`
+
+Every event includes `id`, `occurredAt`, `conversationId`, per-conversation
+`sequence`, nullable `topic`, `actor`, and `cause`. Message events include
+`messageId`; state changes include `{from,to}`; delivery updates include
+`deliveryState`; source merge events include `mergedIntoConversationId`, while
+the survivor merge event omits it. Direct email emits no conversation events,
+and event payloads contain no email addresses, content, or raw provider data.
+
+Both transports include `x-conversation-event-id` and
+`x-conversation-event-schema-version`. Kafka uses `conversationId` as its
+record key. NATS sets JetStream `Nats-Msg-Id` to the event ID. Delivery is at
+least once and independent per sink: reject unsupported schema versions,
+deduplicate by event ID, order within each conversation by sequence, tolerate a
+non-1 starting sequence or gaps, and fetch full data through an authorized HTTP
+conversation read. Enabling a sink does not backfill earlier events.
 
 ## Critical invariants
 
@@ -137,7 +172,11 @@ Conversations created before the V1 retirement are still stored with `apiVersion
 7. Reconcile queued direct state by replaying the enqueue operation with the same key and normalized request; do not create a replacement send with a new key.
 8. Schedule the shared drain with the dedicated credential at `/api/emails/v2/outbox/drain`. It is the only drain route.
 9. Sanitize response HTML.
-10. Validate request and response models against upstream OpenAPI contract `0.6.0`.
+10. Validate request and response models against upstream OpenAPI contract
+    `0.7.0-rc.2`.
+11. If consuming conversation events, generate or validate handlers against
+    AsyncAPI contract `0.7.0-rc.2`, reject unsupported payload schema versions,
+    and persist event IDs for deduplication.
 
 ## Known concerns
 

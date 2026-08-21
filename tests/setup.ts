@@ -4,13 +4,10 @@ import { resolveEmailV2ApiKey } from '@/lib/environment';
 
 config({ path: path.resolve(__dirname, '../.env.test') });
 
-const testDatabaseUrl = process.env.TEST_DATABASE_URL;
-
-if (!testDatabaseUrl) {
-  throw new Error(
-    'Missing TEST_DATABASE_URL environment variable for destructive PostgreSQL integration tests',
-  );
-}
+const LOCAL_COMPOSE_TEST_DATABASE_URL =
+  'postgresql://postgres:postgres@localhost:5432/resend_test';
+const testDatabaseUrl =
+  process.env.TEST_DATABASE_URL?.trim() || LOCAL_COMPOSE_TEST_DATABASE_URL;
 
 export const TEST_CONFIG = {
   appBaseUrl: process.env.APP_BASE_URL || 'http://localhost:3000',

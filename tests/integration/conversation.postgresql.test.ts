@@ -149,6 +149,11 @@ describe('Private conversation API', () => {
     const contract = await fetch(`${TEST_CONFIG.appBaseUrl}/openapi.json`);
     expect(contract.status).toBe(200);
     expect((await contract.json()).openapi).toBe('3.1.1');
+    const eventContract = await fetch(
+      `${TEST_CONFIG.appBaseUrl}/asyncapi.json`,
+    );
+    expect(eventContract.status).toBe(200);
+    expect((await eventContract.json()).asyncapi).toBe('3.1.0');
 
     const unsupported = await fetch(`${baseUrl}/outbox`, {
       method: 'GET',
