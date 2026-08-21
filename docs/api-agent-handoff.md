@@ -68,7 +68,7 @@ Do not infer which policy check failed.
 
 ## Primary routes
 
-The complete route layout:
+The complete application-operation layout:
 
 | Method | V2 path | Purpose |
 | --- | --- | --- |
@@ -136,7 +136,7 @@ conversation read. Enabling a sink does not backfill earlier events.
 13. `accepted` is provider API acceptance, not final delivery. Direct email has no read endpoint for later projected delivery state.
 14. Out-of-order row reconciliation preserves one-way V2 promotion and historical routing-token/base aliases when conversations merge.
 15. Conversation `state` is one of `awaiting_us`, `awaiting_participant`, `concluded`, `terminated`, with `stateChangedAt` and a derived `awaitingReply` boolean. Inbound sets `awaiting_us`; persisted outbound reply intent sets `awaiting_participant`; a bounced, complained, or suppressed outbound delivery sets `terminated`. `email.failed` is not terminal.
-16. Automatic mail-flow transitions move `stateChangedAt` only when the state value changes, so `awaiting_us` records when the wait began. Every successful manual state write resets it, including a repeated state value.
+16. Automatic transitions move `stateChangedAt` only when the state value changes, so `awaiting_us` records when the wait began. Every successful manual state write currently resets it, including a repeated value.
 17. Automatic transitions never move `terminated`; inbound mail reopens `concluded`. Merges take `terminated` > `awaiting_us` > `awaiting_participant` > `concluded` with the earliest timestamp of the winning state.
 18. State transitions are driven by mail flow rather than by the route that triggered them, so they apply equally to conversations created before the V1 retirement. The state route permits every transition and repeating one succeeds.
 
@@ -187,4 +187,8 @@ Conversations created before the V1 retirement are still stored with `apiVersion
 - Health readiness requires `DATABASE_URL`, `RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET`, a valid `RESEND_REPLY_TO`, an EMAIL V2 credential, `OUTBOX_DRAIN_API_KEY`, and PostgreSQL connectivity.
 - Runtime accepts trimmed, case-insensitive manual state values; use lowercase OpenAPI enum values.
 - Runtime webhook family acceptance is broader than the documented event enums; send only documented Resend event types.
+- Runtime and OpenAPI currently reset `stateChangedAt` after every successful manual state write, including a repeated value. This conflicts with the service lifecycle invariant that the timestamp should change only with the state value; avoid no-op state writes and do not depend on the reset.
+- Conversation runtime may ignore an explicitly empty body format when the other format is nonempty; keep every supplied `text` or `html` nonempty as required by OpenAPI.
+- Do not attach read-pagination query parameters to assignment or state mutations. An invalid undocumented `before` value can produce `400` after the mutation has committed.
+- Conversation events have no application-level dead-letter or terminal attempt limit. Persistently failing publication blocks later sequence values for that conversation and sink, and event wire behavior lacks end-to-end AsyncAPI conformance coverage.
 - Dedicated tests cover central V2 identity, promotion, revocation, and routing behavior; not every mirrored read/mutation route has a separate V2 integration case.

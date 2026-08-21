@@ -15,7 +15,7 @@
       "variables": {
         "server": {
           "default": "nats:4222",
-          "description": "Deployment-provided NATS host and port."
+          "description": "Deployment-provided NATS host and port. The default is an AsyncAPI substitution example, not a service runtime fallback."
         }
       }
     },
@@ -26,7 +26,7 @@
       "variables": {
         "broker": {
           "default": "kafka:9092",
-          "description": "Deployment-provided Kafka broker host and port."
+          "description": "Deployment-provided Kafka broker host and port. The default is an AsyncAPI substitution example, not a service runtime fallback."
         }
       }
     }
@@ -44,7 +44,7 @@
       "parameters": {
         "subject": {
           "default": "conversation.events.v1",
-          "description": "The value of CONVERSATION_EVENTS_NATS_SUBJECT."
+          "description": "The deployment-provided value of CONVERSATION_EVENTS_NATS_SUBJECT. The default is an AsyncAPI substitution example; runtime configuration is required when the sink is enabled."
         }
       },
       "messages": {
@@ -83,7 +83,7 @@
       "parameters": {
         "topic": {
           "default": "conversation-events-v1",
-          "description": "The value of CONVERSATION_EVENTS_KAFKA_TOPIC."
+          "description": "The deployment-provided value of CONVERSATION_EVENTS_KAFKA_TOPIC. The default is an AsyncAPI substitution example; runtime configuration is required when the sink is enabled."
         }
       },
       "messages": {
@@ -116,7 +116,7 @@
       "action": "send",
       "title": "Publish conversation events to NATS",
       "summary": "Publishes committed conversation lifecycle events to the configured JetStream subject.",
-      "description": "Delivery is at least once. Deduplicate by payload id, process each conversation by sequence, and do not assume sequence 1 will be available when a sink is enabled later.",
+      "description": "Delivery is at least once and persisted independently for each sink enabled when the event is created. Failed publication is retried without a terminal attempt limit and blocks later sequence values for the same conversation on this sink. Deduplicate by payload id, process each conversation by sequence, and do not assume sequence 1 will be available. Enabling this sink does not backfill events committed before it was enabled.",
       "channel": {
         "$ref": "#/channels/natsConversationEvents"
       },
@@ -153,7 +153,7 @@
       "action": "send",
       "title": "Publish conversation events to Kafka",
       "summary": "Publishes committed conversation lifecycle events to the configured Kafka topic.",
-      "description": "Delivery is at least once. Deduplicate by payload id, process each conversation by sequence, and do not assume sequence 1 will be available when a sink is enabled later.",
+      "description": "Delivery is at least once and persisted independently for each sink enabled when the event is created. Failed publication is retried without a terminal attempt limit and blocks later sequence values for the same conversation on this sink. Deduplicate by payload id, process each conversation by sequence, and do not assume sequence 1 will be available. Enabling this sink does not backfill events committed before it was enabled.",
       "channel": {
         "$ref": "#/channels/kafkaConversationEvents"
       },
@@ -237,7 +237,7 @@
               "type": "conversation.message.received",
               "occurredAt": "2026-08-20T22:48:24.978Z",
               "conversationId": "01a0192e-efb8-7725-abda-3bec284104ea",
-              "sequence": 3,
+              "sequence": 4,
               "topic": {
                 "type": "booking",
                 "externalId": "booking-4821"
@@ -261,16 +261,16 @@
           {
             "name": "outboxReplyEnqueued",
             "headers": {
-              "x-conversation-event-id": "01a02151-83a9-7273-adba-91186c951220",
+              "x-conversation-event-id": "01a02151-83a9-7273-adba-91186c951221",
               "x-conversation-event-schema-version": "1"
             },
             "payload": {
               "schemaVersion": 1,
-              "id": "01a02151-83a9-7273-adba-91186c951220",
+              "id": "01a02151-83a9-7273-adba-91186c951221",
               "type": "conversation.message.outbound.intended",
               "occurredAt": "2026-08-20T22:36:25.282Z",
               "conversationId": "01a0192e-efb8-7725-abda-3bec284104ea",
-              "sequence": 1,
+              "sequence": 2,
               "topic": {
                 "type": "booking",
                 "externalId": "booking-4821"
@@ -303,7 +303,7 @@
               "type": "conversation.state.changed",
               "occurredAt": "2026-08-20T22:48:24.978Z",
               "conversationId": "01a0192e-efb8-7725-abda-3bec284104ea",
-              "sequence": 4,
+              "sequence": 5,
               "topic": {
                 "type": "booking",
                 "externalId": "booking-4821"
@@ -330,16 +330,16 @@
           {
             "name": "conversationAssignedToBooking",
             "headers": {
-              "x-conversation-event-id": "01a02160-0000-7000-8000-000000000001",
+              "x-conversation-event-id": "01a02167-1980-7000-8000-000000000001",
               "x-conversation-event-schema-version": "1"
             },
             "payload": {
               "schemaVersion": 1,
-              "id": "01a02160-0000-7000-8000-000000000001",
+              "id": "01a02167-1980-7000-8000-000000000001",
               "type": "conversation.assigned",
               "occurredAt": "2026-08-20T23:00:00.000Z",
-              "conversationId": "01a0192e-efb8-7725-abda-3bec284104ea",
-              "sequence": 5,
+              "conversationId": "01a0192e-efb8-7725-abda-3bec284104ec",
+              "sequence": 3,
               "topic": {
                 "type": "booking",
                 "externalId": "booking-4821"
@@ -371,7 +371,7 @@
               "type": "conversation.message.delivery.updated",
               "occurredAt": "2026-08-20T22:40:03.858Z",
               "conversationId": "01a0192e-efb8-7725-abda-3bec284104ea",
-              "sequence": 2,
+              "sequence": 3,
               "topic": {
                 "type": "booking",
                 "externalId": "booking-4821"
@@ -397,16 +397,16 @@
           {
             "name": "sourceConversationMerged",
             "headers": {
-              "x-conversation-event-id": "01a02161-0000-7000-8000-000000000001",
+              "x-conversation-event-id": "01a0216b-ad60-7000-8000-000000000001",
               "x-conversation-event-schema-version": "1"
             },
             "payload": {
               "schemaVersion": 1,
-              "id": "01a02161-0000-7000-8000-000000000001",
+              "id": "01a0216b-ad60-7000-8000-000000000001",
               "type": "conversation.merged",
               "occurredAt": "2026-08-20T23:05:00.000Z",
-              "conversationId": "01a0192e-efb8-7725-abda-3bec284104ea",
-              "sequence": 6,
+              "conversationId": "01a0192e-efb8-7725-abda-3bec284104ed",
+              "sequence": 2,
               "topic": null,
               "actor": "system",
               "cause": "thread_reconciliation",
@@ -416,12 +416,12 @@
           {
             "name": "survivorConversationRecordedMerge",
             "headers": {
-              "x-conversation-event-id": "01a02161-0000-7000-8000-000000000002",
+              "x-conversation-event-id": "01a0216b-ad60-7000-8000-000000000002",
               "x-conversation-event-schema-version": "1"
             },
             "payload": {
               "schemaVersion": 1,
-              "id": "01a02161-0000-7000-8000-000000000002",
+              "id": "01a0216b-ad60-7000-8000-000000000002",
               "type": "conversation.merged",
               "occurredAt": "2026-08-20T23:05:00.000Z",
               "conversationId": "01a0192e-efb8-7725-abda-3bec284104eb",

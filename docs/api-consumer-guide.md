@@ -312,13 +312,13 @@ Every conversation read includes `state`, `stateChangedAt`, and a derived `await
 | `concluded` | The exchange is finished and needs no follow-up | Operators, through the state route |
 | `terminated` | The participant is unreachable, or an operator ended the thread | A bounced, complained, or suppressed outbound delivery, or the state route |
 
-Automatic mail-flow transitions move `stateChangedAt` only when the state value changes, so a conversation waiting on a reply keeps the timestamp of the message that started the wait however many further messages arrive. Every successful manual state write resets `stateChangedAt`, including a repeated state value. Automatic transitions never move a `terminated` conversation; inbound mail reopens a `concluded` one. A send-side `email.failed` is not terminal, since it says nothing about whether the participant can be reached.
+Automatic mail-flow transitions move `stateChangedAt` only when the state value changes, so a conversation waiting on a reply keeps the timestamp of the message that started the wait however many further messages arrive. Every successful manual state write currently resets `stateChangedAt`, including a repeated state value. Automatic transitions never move a `terminated` conversation; inbound mail reopens a `concluded` one. A send-side `email.failed` is not terminal, since it says nothing about whether the participant can be reached.
 
 `GET /api/conversations/v2/summary` returns `counts` for all four states regardless of any filter, `count` for the selected states, and a page of conversations ordered by oldest `stateChangedAt` first. Filter with `state`, repeated or comma-separated and matched case-insensitively; omit it to list every state. `?state=awaiting_us` is therefore a reply queue with the longest wait at the top. Paginate with `limit` from 1 through 100 and the opaque `page.before` cursor.
 
 Summary items carry conversation metadata only. There is deliberately no message payload; read messages from `GET /api/conversations/v2/{conversationId}`.
 
-Clear a conversation that needs no follow-up, such as a bare acknowledgement, with `POST /api/conversations/v2/{conversationId}/state` and body `{"state":"concluded"}`. Every state is settable and every transition is permitted, including reopening a `terminated` conversation. Setting the state a conversation already holds succeeds, so retries are safe. No email is sent, so this route takes no `Idempotency-Key`.
+Clear a conversation that needs no follow-up, such as a bare acknowledgement, with `POST /api/conversations/v2/{conversationId}/state` and body `{"state":"concluded"}`. Every state is settable and every transition is permitted, including reopening a `terminated` conversation. Setting the state a conversation already holds succeeds and leaves the state value unchanged, but currently resets `stateChangedAt`. No email is sent, so this route takes no `Idempotency-Key`.
 
 State transitions are driven by mail flow rather than by the route that triggered them, so they apply equally to conversations created before the V1 retirement.
 
@@ -449,9 +449,10 @@ operation when an event consumer needs current conversation or message data.
 
 The machine-readable contract is the AsyncAPI 3.1 document at
 `GET /asyncapi.json`. Broker endpoints, subscriber credentials, NATS stream
-names, and final subject or topic names are deployment-owned. The documented
-defaults are `conversation.events.v1` for the NATS subject and
-`conversation-events-v1` for the Kafka topic.
+names, and final subject or topic names are deployment-owned. Values shown as
+AsyncAPI server, subject, or topic defaults are substitution examples only;
+the service has no runtime fallback when an enabled sink omits its required
+configuration.
 
 Every event has these required payload fields:
 
@@ -474,7 +475,7 @@ Event-specific fields and causes are:
 | `conversation.created` | None | `participant` / `inbound_email` or `service` / `outbound_intent` |
 | `conversation.message.received` | `messageId` | `participant` / `inbound_email` |
 | `conversation.message.outbound.intended` | `messageId` | `service` / `synchronous_send` or `outbox_enqueue` |
-| `conversation.state.changed` | `state: {from, to}` | Participant inbound, service outbound intent, operator manual override, or system unreachable delivery |
+| `conversation.state.changed` | `state: {from, to}` | `participant` / `inbound_email`, `service` / `outbound_intent`, `operator` / `manual_override`, or `system` / `unreachable_delivery` |
 | `conversation.assigned` | Non-null `topic` | `operator` / `topic_assignment` |
 | `conversation.message.delivery.updated` | `messageId`, `deliveryState` | `system` / `resend_delivery_webhook` |
 | `conversation.merged` | Source events include `mergedIntoConversationId`; the survivor event omits it | `system` / `thread_reconciliation` |
@@ -493,7 +494,10 @@ sets the protocol-defined `Nats-Msg-Id` to the event ID. The JSON payload is
 otherwise identical when both sinks are enabled, and each sink is delivered
 and retried independently.
 
-Delivery is at least once. Consumers must:
+Publication failures are retried from persisted per-sink delivery records
+without a terminal attempt limit. A failed event blocks later sequence values
+for the same conversation and sink, but the other configured sink retains its
+own acknowledgement and retry state. Delivery is at least once. Consumers must:
 
 1. Reject or quarantine an unsupported `schemaVersion` before dispatching on
    `type`.
@@ -507,6 +511,12 @@ Delivery is at least once. Consumers must:
    closed schema-v1 contract rather than silently guessing its meaning.
 6. Make handlers idempotent because the event and downstream side effects may
    be replayed.
+
+Creation does not include an initial state field, and thread reconciliation can
+change the survivor's state without a separate `conversation.state.changed`
+event. Treat the feed as a lifecycle notification stream rather than a complete
+state-reconstruction log; fetch the current authorized HTTP representation when
+state convergence matters.
 
 An incompatible field, value, or event-kind change requires a future payload
 schema version and a new versioned subject or topic. Consumers should not treat
@@ -580,5 +590,9 @@ curl -i \
 - Runtime webhook family validation accepts signed `email.*`, `contact.*`, and `domain.*` types when their payload can be projected, while the OpenAPI event enums remain the strict supported contract. Consumers should send only documented Resend event types.
 - Health readiness requires `DATABASE_URL`, `RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET`, a valid `RESEND_REPLY_TO` base, an EMAIL V2 credential, `OUTBOX_DRAIN_API_KEY`, and PostgreSQL connectivity.
 - Runtime accepts trimmed, case-insensitive state values for the manual state route; use the lowercase OpenAPI enum values as the supported contract.
-- Manual state writes reset `stateChangedAt` even on a no-op repeat; automatic mail-flow transitions update it only when the state changes.
+- Current runtime and OpenAPI reset `stateChangedAt` after every successful manual state write, including a repeated value. This conflicts with the service lifecycle invariant that the timestamp should change only with the state value; avoid no-op state writes and do not depend on the reset while the discrepancy remains unresolved.
+- Conversation send validators may ignore an explicitly empty `text` or `html` when the other body format is nonempty. The strict contract requires every supplied body field to be nonempty.
+- `PATCH /api/conversations/v2/{conversationId}` and the manual state route do not support pagination query parameters. Current runtime can commit the mutation and then return `400` if an undocumented invalid `before` query is supplied during response hydration; do not attach read-pagination parameters to mutation requests.
+- Event publishing has no application-level dead-letter or terminal attempt limit. A poison or persistently unavailable event can block later sequence values for that conversation and sink.
+- Event production and successful broker publication, headers, ordering, retry, and no-backfill behavior do not yet have end-to-end conformance tests against AsyncAPI.
 - Integration coverage confirms credential separation, structured identity validation, role separation, generic rejection, alias preservation, promotion of `V1`-tagged conversations, allowlist revocation behavior, fixed Reply-To base behavior, and token-based inbound routing.

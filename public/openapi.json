@@ -494,7 +494,7 @@
       "post": {
         "operationId": "drainEmailOutboxV2",
         "summary": "Deliver one shared outbox batch",
-        "description": "Delivers one bounded, ordered batch from the shared transactional outbox. It uses only OUTBOX_DRAIN_API_KEY and may deliver direct and conversation messages in one fixed ordered batch. This is the only drain route; schedule it at least once per minute when using queued sends. A batch that fails or is indeterminate is retried on a later invocation with the same provider idempotency key inside the safety window.",
+        "description": "Delivers one bounded, ordered batch from the shared transactional outbox. It uses only OUTBOX_DRAIN_API_KEY and may deliver direct and conversation messages in one fixed ordered batch. This is the only drain route; schedule it at least once per minute when using queued sends. A retryable provider failure preserves the fixed batch and provider idempotency key for a later invocation inside the safety window. Final failed or indeterminate outcomes are terminal and are not retried.",
         "tags": ["Outbox"],
         "security": [
           {
@@ -996,7 +996,7 @@
       "post": {
         "operationId": "setConversationStateV2",
         "summary": "Set the conversation state",
-        "description": "Operator override for the conversation state, most commonly marking a conversation concluded when it needs no follow-up. Every state is settable and every transition is permitted, including reopening a terminated conversation. Setting the state a conversation already holds succeeds, so retries are safe. No email is sent or enqueued, so no Idempotency-Key is required.",
+        "description": "Operator override for the conversation state, most commonly marking a conversation concluded when it needs no follow-up. Every state is settable and every transition is permitted, including reopening a terminated conversation. Setting the state a conversation already holds succeeds and leaves the state value unchanged, but currently resets stateChangedAt. No email is sent or enqueued, so no Idempotency-Key is required.",
         "tags": ["Conversations"],
         "security": [
           {
@@ -2124,7 +2124,7 @@
           "stateChangedAt": {
             "type": "string",
             "format": "date-time",
-            "description": "For automatic mail-flow transitions, when the conversation last entered its current state. Automatic transitions only move it when the state value changes, so for awaiting_us it records how long the reply has been owed. A successful manual state write resets it, including a repeated state value."
+            "description": "For automatic mail-flow transitions, when the conversation last entered its current state. Automatic transitions only move it when the state value changes, so for awaiting_us it records how long the reply has been owed. A successful manual state write currently resets it, including a repeated state value."
           },
           "awaitingReply": {
             "type": "boolean",
