@@ -8,6 +8,8 @@ and this project uses [Semantic Versioning](https://semver.org/). See
 
 ## [Unreleased]
 
+## [0.7.0-rc.3] - 2026-08-20
+
 ### Added
 
 - Added an AsyncAPI 3.1 contract for all seven conversation lifecycle event
