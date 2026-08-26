@@ -40,6 +40,7 @@ configuration.
 
 ```text
 .github/                # CI workflows and the pull request template
+infra/nats/streams/     # JetStream stream configs (nats stream add --config)
 prisma/                 # Prisma schema and immutable migration history
 public/openapi.json     # Unified OpenAPI contract
 public/asyncapi.json    # NATS and Kafka conversation event contract
@@ -216,7 +217,10 @@ internal dispatcher. NATS requires `CONVERSATION_EVENTS_NATS_SERVERS`,
 `CONVERSATION_EVENTS_NATS_STREAM`, and `CONVERSATION_EVENTS_NATS_SUBJECT`.
 Kafka requires `CONVERSATION_EVENTS_KAFKA_BROKERS`,
 `CONVERSATION_EVENTS_KAFKA_CLIENT_ID`, and `CONVERSATION_EVENTS_KAFKA_TOPIC`.
-The process validates and connects to every enabled sink before listening.
+The process validates and connects to every enabled sink before listening; it
+expects the NATS stream to already exist. Provision it with
+`nats stream add --config infra/nats/streams/CONVERSATION_EVENTS.json`, and
+set `CONVERSATION_EVENTS_NATS_STREAM` to match the config's `name`.
 
 Events are at-least-once and must be deduplicated by their `id`. Their compact
 payload contains a schema version, event type, conversation ID, per-conversation

@@ -131,3 +131,8 @@
 - Describe pull requests with the sections in
   [.github/pull_request_template.md](.github/pull_request_template.md), dropping
   the ones that do not apply.
+- Keep the checked-in JetStream provisioning config at
+  [infra/nats/streams/CONVERSATION_EVENTS.json](infra/nats/streams/CONVERSATION_EVENTS.json)
+  aligned with `public/asyncapi.json` and with whatever
+  `CONVERSATION_EVENTS_NATS_STREAM` is set to in deployment; its `name` field
+  is the stream name operators must provision under.
