@@ -1,0 +1,15 @@
+{
+  "name": "CONVERSATION_EVENTS",
+  "subjects": ["conversation.events.v1"],
+  "retention": "limits",
+  "storage": "file",
+  "num_replicas": 1,
+  "discard": "old",
+  "max_age": 31536000000000000,
+  "max_bytes": 1073741824,
+  "max_msg_size": 65536,
+  "duplicate_window": 7200000000000,
+  "deny_delete": true,
+  "deny_purge": true,
+  "allow_rollup_hdrs": false
+}
