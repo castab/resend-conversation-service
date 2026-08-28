@@ -38,6 +38,7 @@ true first:
 - `public/openapi.json`
 - `public/asyncapi.json`
 - `docs/api-consumer-guide.md`
+- `docs/api-agent-handoff.md`
 - `CHANGELOG.md`
 
 Run `npm run release:validate` before opening or merging a release PR.

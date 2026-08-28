@@ -8,6 +8,45 @@ and this project uses [Semantic Versioning](https://semver.org/). See
 
 ## [Unreleased]
 
+## [0.7.0-rc.4] - 2026-08-28
+
+### Added
+
+- Added an optional built-in cron scheduler that drains the shared email outbox
+  from inside the service. It is disabled unless
+  `OUTBOX_DRAIN_SCHEDULE_ENABLED` is `true`, is configured with
+  `OUTBOX_DRAIN_SCHEDULE`, `OUTBOX_DRAIN_SCHEDULE_TIMEZONE`,
+  `OUTBOX_DRAIN_SCHEDULE_BATCH_SIZE`, and `OUTBOX_DRAIN_SCHEDULE_MAX_BATCHES`,
+  and supplements rather than replaces `POST /api/emails/v2/outbox/drain`.
+  Deployments driven by an external trigger are unaffected.
+
+### Changed
+
+- Retuned the checked-in JetStream provisioning config to lightweight defaults
+  and documented every field as an operator-tunable suggestion in
+  `infra/nats/streams/README.md`.
+- Corrected the `CONVERSATION_EVENTS_NATS_STREAM` example so it matches the
+  `name` in the checked-in stream config.
+
+### Removed
+
+- Removed the Kafka conversation event sink. NATS JetStream is now the only
+  supported transport: the `kafkajs` dependency, every
+  `CONVERSATION_EVENTS_KAFKA_*` variable, the `KAFKA` value of the
+  `ConversationEventSink` enum, and the Kafka server, channel, operation, and
+  message bindings in `public/asyncapi.json` are gone. Kafka may return in a
+  later version; the sink abstraction and the plural `CONVERSATION_EVENTS_SINKS`
+  variable were kept for that.
+
+### Breaking
+
+- The `20260820000000_add_conversation_events` migration was rewritten in place
+  to create `ConversationEventSink` with `NATS` only. A database that already
+  applied it will fail `prisma migrate deploy` on a checksum mismatch and must
+  be recreated with `npx prisma migrate reset --force` rather than migrated
+  forward. This is acceptable only because the migration has shipped solely in
+  `0.7.0` release candidates.
+
 ## [0.7.0-rc.3] - 2026-08-20
 
 ### Added

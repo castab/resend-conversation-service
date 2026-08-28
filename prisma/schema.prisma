@@ -64,7 +64,6 @@ enum ConversationEventType {
 
 enum ConversationEventSink {
   NATS
-  KAFKA
 }
 
 model EmailConversation {

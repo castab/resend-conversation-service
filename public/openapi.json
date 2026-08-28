@@ -2,7 +2,7 @@
   "openapi": "3.1.1",
   "info": {
     "title": "resend-conversation-service API",
-    "version": "0.7.0-rc.3",
+    "version": "0.7.0-rc.4",
     "description": "Receives signed Resend webhooks and provides bearer-authenticated topic-centered conversations plus synchronous and queued direct email. Conversation API v2 is the only conversation contract; conversation API v1 was retired in 0.5.0 and its paths are no longer routed. The service persists outbound intent before contacting Resend, preserves RFC reply relationships for conversations, and stores untrusted email content without retrieving attachments. The separate AsyncAPI contract for conversation lifecycle events is available from the deployed service at `/asyncapi.json`.",
     "license": {
       "name": "MIT",
@@ -494,7 +494,7 @@
       "post": {
         "operationId": "drainEmailOutboxV2",
         "summary": "Deliver one shared outbox batch",
-        "description": "Delivers one bounded, ordered batch from the shared transactional outbox. It uses only OUTBOX_DRAIN_API_KEY and may deliver direct and conversation messages in one fixed ordered batch. This is the only drain route; schedule it at least once per minute when using queued sends. A retryable provider failure preserves the fixed batch and provider idempotency key for a later invocation inside the safety window. Final failed or indeterminate outcomes are terminal and are not retried.",
+        "description": "Delivers one bounded, ordered batch from the shared transactional outbox. It uses only OUTBOX_DRAIN_API_KEY and may deliver direct and conversation messages in one fixed ordered batch. This is the only drain route; invoke it at least once per minute when using queued sends. The service can also drive this same drain internally on a cron schedule instead of an external caller; that scheduler is disabled by default and is configured with OUTBOX_DRAIN_SCHEDULE_ENABLED and OUTBOX_DRAIN_SCHEDULE. A retryable provider failure preserves the fixed batch and provider idempotency key for a later invocation inside the safety window. Final failed or indeterminate outcomes are terminal and are not retried.",
         "tags": ["Outbox"],
         "security": [
           {

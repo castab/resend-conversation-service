@@ -13,6 +13,10 @@ import {
   stopConversationEventRuntime,
 } from '@/lib/conversation-event-runtime';
 import { getPrismaClient } from '@/lib/database';
+import {
+  startOutboxDrainScheduler,
+  stopOutboxDrainScheduler,
+} from '@/lib/outbox-drain-scheduler';
 import { POST as enqueueMessageV2 } from '@/routes/conversations/v2/[conversationId]/messages/outbox/route';
 import { POST as sendMessageV2 } from '@/routes/conversations/v2/[conversationId]/messages/route';
 import {
@@ -276,6 +280,7 @@ async function startServer() {
   try {
     const client = getPrismaClient();
     await startConversationEventRuntime(client);
+    startOutboxDrainScheduler(client);
     const port = Number(process.env.PORT ?? 3000);
     const host = process.env.HOST ?? process.env.HOSTNAME ?? '0.0.0.0';
     const server = createServer(createApp()).listen(port, host, () =>
@@ -288,6 +293,7 @@ async function startServer() {
       }
       closing = true;
       server.close(async () => {
+        await stopOutboxDrainScheduler();
         await stopConversationEventRuntime();
         await client.$disconnect();
         process.exit(0);
@@ -301,7 +307,7 @@ async function startServer() {
       error instanceof Error
         ? `${error.name}: ${error.message}`
         : String(error);
-    console.error(`Conversation event runtime failed to start: ${details}`);
+    console.error(`Application startup failed: ${details}`);
     process.exit(1);
   }
 }

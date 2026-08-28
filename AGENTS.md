@@ -36,6 +36,11 @@
 - Require the dedicated drain credential on the outbox drain operation.
 - Keep `POST /api/emails/v2/outbox/drain` as the single drain route. Do not
   reintroduce a conversation-namespaced drain alias.
+- Keep the built-in cron drain scheduler disabled unless
+  `OUTBOX_DRAIN_SCHEDULE_ENABLED` is exactly `true`. It must call the shared
+  `drainEmailOutbox` implementation directly rather than adding a route or
+  duplicating drain logic, must fail startup on invalid schedule configuration,
+  and must not gate `GET /api/health/v2`.
 - Require `Idempotency-Key` on every operation that can send or enqueue email.
 - Persist send intent before calling Resend and never add unbounded retries.
 - In V2, authorize canonical lowercase addresses by exact `(address, role)`
@@ -112,6 +117,18 @@
 - Keep the per-conversation Reply-To routing token and Message-ID hydration as
   designed; see [docs/adr-0001-reply-to-routing-tokens.md](docs/adr-0001-reply-to-routing-tokens.md)
   for why (Resend/SES overwrites caller-supplied Message-IDs).
+
+## Conversation Events
+
+- Keep NATS JetStream the only conversation event sink. Kafka was removed in
+  0.7.0; do not reintroduce `kafkajs`, `CONVERSATION_EVENTS_KAFKA_*`, a `KAFKA`
+  value in `ConversationEventSink`, or Kafka servers, channels, operations, or
+  bindings in `public/asyncapi.json`.
+- Keep `CONVERSATION_EVENTS_SINKS` plural and keep the `ConversationEventSink`
+  interface and per-sink delivery records intact so another transport can be
+  added later without reshaping the outbox.
+- Expect the stream to already exist. Verify it and its subject at startup and
+  fail fast; never create or mutate a stream from the service.
 
 ## Contracts And Tests
 
