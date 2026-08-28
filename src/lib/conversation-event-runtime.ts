@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { Kafka, logLevel, type Producer } from 'kafkajs';
 import {
   connect,
   headers,
@@ -132,11 +131,7 @@ export async function stopConversationEventRuntime() {
 
 async function createConfiguredSinks(): Promise<ConversationEventSink[]> {
   const names = getEnabledConversationEventSinks();
-  const results = await Promise.allSettled(
-    names.map((name) =>
-      name === 'NATS' ? createNatsSink() : createKafkaSink(),
-    ),
-  );
+  const results = await Promise.allSettled(names.map(() => createNatsSink()));
   const sinks = results
     .filter(
       (result): result is PromiseFulfilledResult<ConversationEventSink> =>
@@ -280,112 +275,6 @@ class NatsConversationEventSink implements ConversationEventSink {
   }
 }
 
-async function createKafkaSink(): Promise<ConversationEventSink> {
-  let brokers: string[];
-  let topic: string;
-  let clientId: string;
-  let securityOptions: ReturnType<typeof kafkaSecurityOptions>;
-  try {
-    brokers = requiredList('CONVERSATION_EVENTS_KAFKA_BROKERS');
-    topic = required('CONVERSATION_EVENTS_KAFKA_TOPIC');
-    clientId = required('CONVERSATION_EVENTS_KAFKA_CLIENT_ID');
-    securityOptions = kafkaSecurityOptions();
-  } catch (error) {
-    throw startupFailure(
-      'KAFKA',
-      'validate configuration',
-      kafkaStartupContext(),
-      error,
-      'Verify the Kafka connection, authentication, and TLS environment variables.',
-    );
-  }
-  const context = kafkaStartupContext({ brokers, topic, clientId });
-  let kafka: Kafka;
-  try {
-    kafka = new Kafka({
-      brokers,
-      clientId,
-      logLevel: logLevel.NOTHING,
-      ...securityOptions,
-    });
-  } catch (error) {
-    throw startupFailure(
-      'KAFKA',
-      'initialize client',
-      context,
-      error,
-      'Verify the Kafka broker and security configuration.',
-    );
-  }
-  const admin = kafka.admin();
-  try {
-    try {
-      await admin.connect();
-    } catch (error) {
-      throw startupFailure(
-        'KAFKA',
-        'connect admin client',
-        context,
-        error,
-        'Verify that the configured Kafka endpoints are reachable and accept the configured authentication and TLS settings.',
-      );
-    }
-    try {
-      await admin.fetchTopicMetadata({ topics: [topic] });
-    } catch (error) {
-      throw startupFailure(
-        'KAFKA',
-        'verify topic metadata',
-        context,
-        error,
-        'Verify that the configured topic exists and that the configured identity can describe it.',
-      );
-    }
-  } finally {
-    await admin.disconnect().catch(() => undefined);
-  }
-  const producer = kafka.producer();
-  try {
-    await producer.connect();
-    return new KafkaConversationEventSink(producer, topic);
-  } catch (error) {
-    await producer.disconnect().catch(() => undefined);
-    throw startupFailure(
-      'KAFKA',
-      'connect producer',
-      context,
-      error,
-      'Verify that the configured Kafka identity can establish a producer connection.',
-    );
-  }
-}
-
-class KafkaConversationEventSink implements ConversationEventSink {
-  readonly name = 'KAFKA' as const;
-  constructor(
-    private readonly producer: Producer,
-    private readonly topic: string,
-  ) {}
-  async publish(event: PublishedConversationEvent) {
-    await this.producer.send({
-      topic: this.topic,
-      messages: [
-        {
-          key: event.conversationId,
-          value: JSON.stringify(event.payload),
-          headers: {
-            'x-conversation-event-id': event.id,
-            'x-conversation-event-schema-version': '1',
-          },
-        },
-      ],
-    });
-  }
-  async close() {
-    await this.producer.disconnect();
-  }
-}
-
 async function claimDeliveries(
   client: PrismaClient,
   sink: ConversationEventSinkName,
@@ -514,24 +403,6 @@ function natsStartupContext(input: NatsStartupContextInput = {}) {
   return `stream="${stream ?? '<unset>'}", subject="${subject ?? '<unset>'}", endpoints=[${sanitizeEndpoints(servers, 4222)}], auth=${token ? 'token' : user ? 'username_password' : 'none'}, tls=${tls}`;
 }
 
-interface KafkaStartupContextInput {
-  brokers?: string[];
-  topic?: string;
-  clientId?: string;
-}
-
-function kafkaStartupContext(input: KafkaStartupContextInput = {}) {
-  const brokers =
-    input.brokers ?? optionalList('CONVERSATION_EVENTS_KAFKA_BROKERS');
-  const topic = input.topic ?? optional('CONVERSATION_EVENTS_KAFKA_TOPIC');
-  const clientId =
-    input.clientId ?? optional('CONVERSATION_EVENTS_KAFKA_CLIENT_ID');
-  const security = (
-    optional('CONVERSATION_EVENTS_KAFKA_SECURITY_PROTOCOL') ?? 'PLAINTEXT'
-  ).toUpperCase();
-  return `topic="${topic ?? '<unset>'}", clientId="${clientId ?? '<unset>'}", endpoints=[${sanitizeEndpoints(brokers, 9092)}], security=${security}`;
-}
-
 function optionalList(name: string) {
   const value = optional(name);
   return value
@@ -613,11 +484,6 @@ function configuredSecretValues() {
     'CONVERSATION_EVENTS_NATS_TLS_CA_PEM',
     'CONVERSATION_EVENTS_NATS_TLS_CERT_PEM',
     'CONVERSATION_EVENTS_NATS_TLS_KEY_PEM',
-    'CONVERSATION_EVENTS_KAFKA_SASL_USERNAME',
-    'CONVERSATION_EVENTS_KAFKA_SASL_PASSWORD',
-    'CONVERSATION_EVENTS_KAFKA_TLS_CA_PEM',
-    'CONVERSATION_EVENTS_KAFKA_TLS_CERT_PEM',
-    'CONVERSATION_EVENTS_KAFKA_TLS_KEY_PEM',
   ]
     .map((name) => process.env[name]?.trim())
     .filter((value): value is string => Boolean(value))
@@ -650,61 +516,4 @@ function natsTlsOptions() {
       ...(cert && key ? { cert, key } : {}),
     },
   };
-}
-
-function kafkaSecurityOptions() {
-  const protocol = (
-    optional('CONVERSATION_EVENTS_KAFKA_SECURITY_PROTOCOL') ?? 'PLAINTEXT'
-  ).toUpperCase();
-  if (!['PLAINTEXT', 'SSL', 'SASL_SSL'].includes(protocol)) {
-    throw new Error('Invalid CONVERSATION_EVENTS_KAFKA_SECURITY_PROTOCOL');
-  }
-  const mechanism = optional(
-    'CONVERSATION_EVENTS_KAFKA_SASL_MECHANISM',
-  )?.toUpperCase();
-  const username = optional('CONVERSATION_EVENTS_KAFKA_SASL_USERNAME');
-  const password = optional('CONVERSATION_EVENTS_KAFKA_SASL_PASSWORD');
-  if (protocol === 'SASL_SSL' && (!mechanism || !username || !password)) {
-    throw new Error(
-      'Kafka SASL_SSL requires mechanism, username, and password',
-    );
-  }
-  if (
-    mechanism &&
-    !['PLAIN', 'SCRAM-SHA-256', 'SCRAM-SHA-512'].includes(mechanism)
-  ) {
-    throw new Error('Invalid CONVERSATION_EVENTS_KAFKA_SASL_MECHANISM');
-  }
-  const ssl = protocol === 'PLAINTEXT' ? undefined : kafkaTlsOptions();
-  const sasl = kafkaSasl(mechanism, username, password);
-  return { ...(ssl ? { ssl } : {}), ...(sasl ? { sasl } : {}) };
-}
-
-function kafkaTlsOptions() {
-  const ca = optional('CONVERSATION_EVENTS_KAFKA_TLS_CA_PEM');
-  const cert = optional('CONVERSATION_EVENTS_KAFKA_TLS_CERT_PEM');
-  const key = optional('CONVERSATION_EVENTS_KAFKA_TLS_KEY_PEM');
-  if ((cert && !key) || (!cert && key)) {
-    throw new Error('Kafka TLS certificate and key must be provided together');
-  }
-  return ca || cert
-    ? { ...(ca ? { ca } : {}), ...(cert && key ? { cert, key } : {}) }
-    : true;
-}
-
-function kafkaSasl(
-  mechanism: string | undefined,
-  username: string | undefined,
-  password: string | undefined,
-) {
-  if (!mechanism || !username || !password) {
-    return undefined;
-  }
-  if (mechanism === 'PLAIN') {
-    return { mechanism: 'plain' as const, username, password };
-  }
-  if (mechanism === 'SCRAM-SHA-256') {
-    return { mechanism: 'scram-sha-256' as const, username, password };
-  }
-  return { mechanism: 'scram-sha-512' as const, username, password };
 }

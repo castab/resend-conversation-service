@@ -494,7 +494,7 @@
       "post": {
         "operationId": "drainEmailOutboxV2",
         "summary": "Deliver one shared outbox batch",
-        "description": "Delivers one bounded, ordered batch from the shared transactional outbox. It uses only OUTBOX_DRAIN_API_KEY and may deliver direct and conversation messages in one fixed ordered batch. This is the only drain route; schedule it at least once per minute when using queued sends. A retryable provider failure preserves the fixed batch and provider idempotency key for a later invocation inside the safety window. Final failed or indeterminate outcomes are terminal and are not retried.",
+        "description": "Delivers one bounded, ordered batch from the shared transactional outbox. It uses only OUTBOX_DRAIN_API_KEY and may deliver direct and conversation messages in one fixed ordered batch. This is the only drain route; invoke it at least once per minute when using queued sends. The service can also drive this same drain internally on a cron schedule instead of an external caller; that scheduler is disabled by default and is configured with OUTBOX_DRAIN_SCHEDULE_ENABLED and OUTBOX_DRAIN_SCHEDULE. A retryable provider failure preserves the fixed batch and provider idempotency key for a later invocation inside the safety window. Final failed or indeterminate outcomes are terminal and are not retried.",
         "tags": ["Outbox"],
         "security": [
           {

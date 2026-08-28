@@ -1,7 +1,7 @@
 import type { Prisma, PrismaClient } from '@/lib/database';
 
 export const CONVERSATION_EVENT_SCHEMA_VERSION = 1;
-export const CONVERSATION_EVENT_SINKS = ['NATS', 'KAFKA'] as const;
+export const CONVERSATION_EVENT_SINKS = ['NATS'] as const;
 export type ConversationEventSinkName =
   (typeof CONVERSATION_EVENT_SINKS)[number];
 export type ConversationEventActor =
@@ -53,9 +53,7 @@ export function getEnabledConversationEventSinks(
         !CONVERSATION_EVENT_SINKS.includes(value as ConversationEventSinkName),
     )
   ) {
-    throw new Error(
-      'CONVERSATION_EVENTS_SINKS must contain only nats and/or kafka',
-    );
+    throw new Error('CONVERSATION_EVENTS_SINKS must contain only nats');
   }
   return values as ConversationEventSinkName[];
 }

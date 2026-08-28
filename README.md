@@ -10,7 +10,7 @@ signature verification remain enforced by the application.
 
 When enabled, the application also writes compact conversation lifecycle events
 to a durable PostgreSQL outbox and publishes them from an internal worker to
-NATS JetStream, Kafka, or both. Events never contain email addresses, content,
+NATS JetStream. Events never contain email addresses, content,
 or raw provider payloads; consumers use their normal authorized conversation
 read requests for that data.
 
@@ -43,7 +43,7 @@ configuration.
 infra/nats/streams/     # JetStream stream configs (nats stream add --config)
 prisma/                 # Prisma schema and immutable migration history
 public/openapi.json     # Unified OpenAPI contract
-public/asyncapi.json    # NATS and Kafka conversation event contract
+public/asyncapi.json    # NATS conversation event contract
 src/routes/                # Express routes and Swagger UI
 src/lib/database/       # Prisma client construction and exports
 src/lib/email/          # Resend client, webhook types, projection, threading
@@ -200,8 +200,11 @@ EMAIL_v2_API_KEY=replace-with-a-long-random-secret
 OUTBOX_DRAIN_API_KEY=replace-with-another-long-random-secret
 
 # Optional: leave unset to disable conversation event publishing.
-# Both sinks can be enabled together; every enabled sink must connect at startup.
+# The sink must connect at startup when enabled.
 CONVERSATION_EVENTS_SINKS=
+
+# Optional: leave unset to keep the built-in drain scheduler disabled.
+OUTBOX_DRAIN_SCHEDULE_ENABLED=
 ```
 
 Callers use `EMAIL_v2_API_KEY` and select only database-allowlisted identities
@@ -212,15 +215,16 @@ routing-token validation.
 
 ### Conversation event feed
 
-Set `CONVERSATION_EVENTS_SINKS=nats`, `kafka`, or `nats,kafka` to enable the
-internal dispatcher. NATS requires `CONVERSATION_EVENTS_NATS_SERVERS`,
+Set `CONVERSATION_EVENTS_SINKS=nats` to enable the internal dispatcher. NATS is
+the only supported sink; it requires `CONVERSATION_EVENTS_NATS_SERVERS`,
 `CONVERSATION_EVENTS_NATS_STREAM`, and `CONVERSATION_EVENTS_NATS_SUBJECT`.
-Kafka requires `CONVERSATION_EVENTS_KAFKA_BROKERS`,
-`CONVERSATION_EVENTS_KAFKA_CLIENT_ID`, and `CONVERSATION_EVENTS_KAFKA_TOPIC`.
-The process validates and connects to every enabled sink before listening; it
-expects the NATS stream to already exist. Provision it with
+The process validates and connects to the sink before listening; it expects the
+NATS stream to already exist. Provision it with
 `nats stream add --config infra/nats/streams/CONVERSATION_EVENTS.json`, and
-set `CONVERSATION_EVENTS_NATS_STREAM` to match the config's `name`.
+set `CONVERSATION_EVENTS_NATS_STREAM` to match the config's `name`. The
+checked-in limits in that file are conservative suggestions meant to be tuned
+per deployment; [infra/nats/streams/README.md](infra/nats/streams/README.md)
+explains each field and what to weigh when changing it.
 
 Events are at-least-once and must be deduplicated by their `id`. Their compact
 payload contains a schema version, event type, conversation ID, per-conversation
@@ -231,12 +235,11 @@ sink starts delivery only for events committed after that sink becomes active.
 
 The complete event contract is the AsyncAPI 3.1 document at
 `GET /asyncapi.json`. It defines all seven closed `schemaVersion: 1` payloads,
-their headers and examples, the Kafka conversation-ID record key, and the NATS
-JetStream message-ID behavior. NATS and Kafka receive the same payload and
-event ID through independent delivery records. Consumers should dispatch on
-`type`, reject unsupported schema versions, deduplicate by `id`, and order work
-within each `conversationId` by `sequence`. A newly enabled sink may begin
-after earlier sequence values and does not receive a backfill.
+their headers and examples, and the NATS JetStream message-ID behavior.
+Consumers should dispatch on `type`, reject unsupported schema versions,
+deduplicate by `id`, and order work within each `conversationId` by `sequence`.
+A newly enabled sink may begin after earlier sequence values and does not
+receive a backfill.
 
 Every Reply-To base must be a plain mailbox on a Resend Receiving domain, without a display name or an
 existing `+` tag. Resend must accept every generated
@@ -423,12 +426,37 @@ authentication enabled even when conversation routes are gateway-restricted.
 Configure Resend to deliver signed events to
 `https://<webhook-host>/api/webhooks/resend/v1`.
 
-Invoke one shared drain route at least once per minute when using asynchronous
-sends. New deployments should use
-`POST /api/emails/v2/outbox/drain`, which is the only drain route. All routes use the same
-persisted outbox and drain credential, may process direct and conversation
-intent together, handle one bounded batch per request, and do not poll
-internally. Do not schedule every route for the same interval.
+Drain the outbox at least once per minute when using asynchronous sends. There
+are two ways to do it, and they can be used interchangeably.
+
+An external caller invokes `POST /api/emails/v2/outbox/drain`, which is the only
+drain route. It uses the persisted outbox and the drain credential, may process
+direct and conversation intent together, handles one bounded batch per request,
+and does not poll internally.
+
+Alternatively the service can drive the same drain itself on a cron schedule.
+This is **disabled by default**, so a deployment that already has an external
+trigger is unaffected. Enable it with `OUTBOX_DRAIN_SCHEDULE_ENABLED=true` and a
+cron expression in `OUTBOX_DRAIN_SCHEDULE`:
+
+```bash
+OUTBOX_DRAIN_SCHEDULE_ENABLED=true
+OUTBOX_DRAIN_SCHEDULE=*/5 * * * *    # required when enabled; 5 or 6 fields
+OUTBOX_DRAIN_SCHEDULE_TIMEZONE=UTC   # optional IANA name, defaults to UTC
+OUTBOX_DRAIN_SCHEDULE_BATCH_SIZE=100 # optional, 1-100, defaults to 100
+OUTBOX_DRAIN_SCHEDULE_MAX_BATCHES=5  # optional, 1-100, defaults to 5
+```
+
+One scheduled tick drains bounded batches until the outbox comes back empty or
+`OUTBOX_DRAIN_SCHEDULE_MAX_BATCHES` is reached, so a backlog clears instead of
+trickling out one batch per tick. An invalid schedule fails startup rather than
+silently never firing. A failing tick is logged and does not affect
+`/api/health/v2`, because the drain already reschedules retryable provider
+failures on its own.
+
+Running the scheduler on several replicas, or alongside an external caller, is
+safe: batches are claimed with row-level locks and leases, so concurrent drains
+take different batches rather than colliding.
 
 ## Verification
 

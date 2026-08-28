@@ -6,7 +6,7 @@ Contract version: `0.7.0-rc.3`
 
 Use the upstream `openapi.json`, `asyncapi.json`, consumer guide, release notes,
 and versioned service artifact as the integration sources of truth. OpenAPI
-covers HTTP; AsyncAPI covers the optional NATS and Kafka conversation event
+covers HTTP; AsyncAPI covers the optional NATS conversation event
 feed. This handoff is portable and assumes no access to the service repository,
 its scripts, or local agent configuration.
 
@@ -93,7 +93,7 @@ resources and are not application operations in OpenAPI.
 ## Conversation events
 
 The optional event feed publishes the same closed `schemaVersion: 1` JSON
-payload to a configured NATS JetStream subject, Kafka topic, or both. It emits
+payload to a configured NATS JetStream subject. It emits
 seven types:
 
 - `conversation.created`
@@ -111,13 +111,12 @@ Every event includes `id`, `occurredAt`, `conversationId`, per-conversation
 the survivor merge event omits it. Direct email emits no conversation events,
 and event payloads contain no email addresses, content, or raw provider data.
 
-Both transports include `x-conversation-event-id` and
-`x-conversation-event-schema-version`. Kafka uses `conversationId` as its
-record key. NATS sets JetStream `Nats-Msg-Id` to the event ID. Delivery is at
-least once and independent per sink: reject unsupported schema versions,
+Published messages include `x-conversation-event-id` and
+`x-conversation-event-schema-version`. NATS sets JetStream `Nats-Msg-Id` to the
+event ID. Delivery is at least once: reject unsupported schema versions,
 deduplicate by event ID, order within each conversation by sequence, tolerate a
 non-1 starting sequence or gaps, and fetch full data through an authorized HTTP
-conversation read. Enabling a sink does not backfill earlier events.
+conversation read. Enabling the sink does not backfill earlier events.
 
 ## Critical invariants
 
@@ -170,7 +169,7 @@ Conversations created before the V1 retirement are still stored with `apiVersion
 5. Persist one idempotency key per logical send or enqueue and reuse it on retries.
 6. Handle `200`, `201`, and `202` as state-bearing success responses.
 7. Reconcile queued direct state by replaying the enqueue operation with the same key and normalized request; do not create a replacement send with a new key.
-8. Schedule the shared drain with the dedicated credential at `/api/emails/v2/outbox/drain`. It is the only drain route.
+8. Schedule the shared drain with the dedicated credential at `/api/emails/v2/outbox/drain`. It is the only drain route. The service may instead be configured to run that drain on its own internal cron schedule, which is disabled by default and does not change this contract.
 9. Sanitize response HTML.
 10. Validate request and response models against upstream OpenAPI contract
     `0.7.0-rc.3`.
@@ -190,5 +189,5 @@ Conversations created before the V1 retirement are still stored with `apiVersion
 - Runtime and OpenAPI currently reset `stateChangedAt` after every successful manual state write, including a repeated value. This conflicts with the service lifecycle invariant that the timestamp should change only with the state value; avoid no-op state writes and do not depend on the reset.
 - Conversation runtime may ignore an explicitly empty body format when the other format is nonempty; keep every supplied `text` or `html` nonempty as required by OpenAPI.
 - Do not attach read-pagination query parameters to assignment or state mutations. An invalid undocumented `before` value can produce `400` after the mutation has committed.
-- Conversation events have no application-level dead-letter or terminal attempt limit. Persistently failing publication blocks later sequence values for that conversation and sink, and event wire behavior lacks end-to-end AsyncAPI conformance coverage.
+- Conversation events have no application-level dead-letter or terminal attempt limit. Persistently failing publication blocks later sequence values for that conversation, and event wire behavior lacks end-to-end AsyncAPI conformance coverage.
 - Dedicated tests cover central V2 identity, promotion, revocation, and routing behavior; not every mirrored read/mutation route has a separate V2 integration case.

@@ -3,7 +3,7 @@ CREATE TYPE "ConversationEventType" AS ENUM (
   'STATE_CHANGED', 'ASSIGNED', 'MESSAGE_DELIVERY_UPDATED', 'MERGED'
 );
 
-CREATE TYPE "ConversationEventSink" AS ENUM ('NATS', 'KAFKA');
+CREATE TYPE "ConversationEventSink" AS ENUM ('NATS');
 
 ALTER TABLE "email_conversations"
   ADD COLUMN "event_sequence" INTEGER NOT NULL DEFAULT 0;

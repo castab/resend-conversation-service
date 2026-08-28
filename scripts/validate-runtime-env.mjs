@@ -72,10 +72,8 @@ const eventSinks = (process.env.CONVERSATION_EVENTS_SINKS ?? '')
   .split(',')
   .map((value) => value.trim().toLowerCase())
   .filter(Boolean);
-if (eventSinks.some((sink) => sink !== 'nats' && sink !== 'kafka')) {
-  console.error(
-    'CONVERSATION_EVENTS_SINKS must contain only nats and/or kafka',
-  );
+if (eventSinks.some((sink) => sink !== 'nats')) {
+  console.error('CONVERSATION_EVENTS_SINKS must contain only nats');
   process.exit(1);
 }
 if (eventSinks.includes('nats')) {
@@ -90,14 +88,42 @@ if (eventSinks.includes('nats')) {
     }
   }
 }
-if (eventSinks.includes('kafka')) {
-  for (const name of [
-    'CONVERSATION_EVENTS_KAFKA_BROKERS',
-    'CONVERSATION_EVENTS_KAFKA_CLIENT_ID',
-    'CONVERSATION_EVENTS_KAFKA_TOPIC',
-  ]) {
-    if (!process.env[name]) {
-      console.error(`Missing ${name} for enabled Kafka conversation events`);
+const drainScheduleEnabled = (
+  process.env.OUTBOX_DRAIN_SCHEDULE_ENABLED ?? ''
+).trim();
+if (drainScheduleEnabled && drainScheduleEnabled.toLowerCase() !== 'true') {
+  console.error('OUTBOX_DRAIN_SCHEDULE_ENABLED must be true when set');
+  process.exit(1);
+}
+if (drainScheduleEnabled) {
+  const expression = (process.env.OUTBOX_DRAIN_SCHEDULE ?? '').trim();
+  if (!expression) {
+    console.error(
+      'Missing OUTBOX_DRAIN_SCHEDULE for the enabled outbox drain scheduler',
+    );
+    process.exit(1);
+  }
+  const fields = expression.split(/\s+/).length;
+  if (fields !== 5 && fields !== 6) {
+    console.error(
+      'OUTBOX_DRAIN_SCHEDULE must be a cron expression with 5 or 6 fields',
+    );
+    process.exit(1);
+  }
+  const bounded = [
+    ['OUTBOX_DRAIN_SCHEDULE_BATCH_SIZE', 1, 100],
+    ['OUTBOX_DRAIN_SCHEDULE_MAX_BATCHES', 1, 100],
+  ];
+  for (const [name, minimum, maximum] of bounded) {
+    const raw = (process.env[name] ?? '').trim();
+    if (!raw) {
+      continue;
+    }
+    const value = Number(raw);
+    if (!Number.isInteger(value) || value < minimum || value > maximum) {
+      console.error(
+        `${name} must be an integer between ${minimum} and ${maximum}`,
+      );
       process.exit(1);
     }
   }

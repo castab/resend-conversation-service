@@ -30,7 +30,7 @@ ingress remains `/api/webhooks/resend/v1`; its V1 path is unrelated to the
 conversation API retirement.
 
 Use the deployed `/openapi.json` contract for HTTP and `/asyncapi.json` for the
-optional NATS or Kafka conversation event feed. Both contracts carry the same
+optional NATS conversation event feed. Both contracts carry the same
 service package version. The event payload schema version is a separate field
 and is currently `1`.
 
@@ -283,7 +283,7 @@ A V2 reply to a `V1`-tagged conversation atomically promotes the conversation wh
 
 Use `POST /api/emails/v2/outbox` for direct email, `POST /api/conversations/v2/outbox` for an opening message, or `POST /api/conversations/v2/{conversationId}/messages/outbox` for a reply. Request bodies match the corresponding synchronous operation.
 
-Enqueue returns `202` after atomically persisting intent and its outbox entry. An idempotent replay also returns `202` while that stored message remains pending; it returns `200` after acceptance or `502` after a failed or indeterminate outcome. A trusted scheduler calls one shared drain alias with the dedicated drain credential:
+Enqueue returns `202` after atomically persisting intent and its outbox entry. An idempotent replay also returns `202` while that stored message remains pending; it returns `200` after acceptance or `502` after a failed or indeterminate outcome. A trusted scheduler calls the shared drain route with the dedicated drain credential:
 
 ```json
 {
@@ -291,7 +291,7 @@ Enqueue returns `202` after atomically persisting intent and its outbox entry. A
 }
 ```
 
-The scheduler path is `POST /api/emails/v2/outbox/drain`, the only drain route. The drain processes at most one persistent batch per request. Direct and conversation intent share global ordering and may occupy one fixed batch, including shared retry and batch-level terminal outcomes. A drain response can return `200` while reporting failed, retried, or indeterminate item state.
+The scheduler path is `POST /api/emails/v2/outbox/drain`, the only drain route. The drain processes at most one persistent batch per request. The service can alternatively run this same drain internally on a cron schedule, which the operator enables with `OUTBOX_DRAIN_SCHEDULE_ENABLED` and `OUTBOX_DRAIN_SCHEDULE`; it is disabled by default and does not change this HTTP contract. Direct and conversation intent share global ordering and may occupy one fixed batch, including shared retry and batch-level terminal outcomes. A drain response can return `200` while reporting failed, retried, or indeterminate item state.
 
 ### Read and assign
 
@@ -441,7 +441,7 @@ Inbound retrieval or projection failure returns `500` so Resend can retry. Outbo
 ## Conversation event feed
 
 When enabled by the service operator, the service publishes compact
-conversation lifecycle events to NATS JetStream, Kafka, or both. Direct email
+conversation lifecycle events to NATS JetStream. Direct email
 does not emit these events. The feed contains identifiers and lifecycle
 metadata only: it does not contain addresses, names, subjects, message bodies,
 headers from email, or raw Resend payloads. Use an authorized conversation GET
@@ -485,19 +485,16 @@ Event-specific fields and causes are:
 `delivered`, `delivery_delayed`, `bounced`, `complained`, `suppressed`, or
 `failed`.
 
-Both transports carry application headers
+Published messages carry application headers
 `x-conversation-event-id` and
 `x-conversation-event-schema-version`. The event-ID header equals payload `id`;
-the schema-version header is the string `"1"`. Kafka serializes the payload as
-the record value and uses `conversationId` as the record key. NATS JetStream
-sets the protocol-defined `Nats-Msg-Id` to the event ID. The JSON payload is
-otherwise identical when both sinks are enabled, and each sink is delivered
-and retried independently.
+the schema-version header is the string `"1"`. NATS JetStream
+sets the protocol-defined `Nats-Msg-Id` to the event ID, which JetStream uses
+for publish deduplication inside the stream's configured duplicate window.
 
 Publication failures are retried from persisted per-sink delivery records
 without a terminal attempt limit. A failed event blocks later sequence values
-for the same conversation and sink, but the other configured sink retains its
-own acknowledgement and retry state. Delivery is at least once. Consumers must:
+for the same conversation. Delivery is at least once. Consumers must:
 
 1. Reject or quarantine an unsupported `schemaVersion` before dispatching on
    `type`.
@@ -505,8 +502,8 @@ own acknowledgement and retry state. Delivery is at least once. Consumers must:
 3. Process one conversation by ascending `sequence`; do not infer ordering
    between different conversations from broker or publication time.
 4. Tolerate a stream beginning above sequence 1 and apparent gaps. Events are
-   created only while at least one sink is enabled, and enabling an additional
-   sink does not backfill events already committed for another sink.
+   created only while the sink is enabled, and enabling it does not backfill
+   events committed while it was disabled.
 5. Treat an unknown event type or extra field as a contract mismatch under the
    closed schema-v1 contract rather than silently guessing its meaning.
 6. Make handlers idempotent because the event and downstream side effects may
@@ -533,7 +530,7 @@ Consumers need the deployed base URL and the credential for their route family. 
 - `EMAIL_v2_API_KEY`, or `EMAIL_V2_API_KEY` as a fallback
 - `OUTBOX_DRAIN_API_KEY` for the shared drain
 
-Event consumers additionally need deployment-provided NATS or Kafka connection
+Event consumers additionally need deployment-provided NATS connection
 details and subscriber credentials. Those credentials are independent of the
 HTTP bearer credentials and are not defined by this service contract.
 
@@ -593,6 +590,6 @@ curl -i \
 - Current runtime and OpenAPI reset `stateChangedAt` after every successful manual state write, including a repeated value. This conflicts with the service lifecycle invariant that the timestamp should change only with the state value; avoid no-op state writes and do not depend on the reset while the discrepancy remains unresolved.
 - Conversation send validators may ignore an explicitly empty `text` or `html` when the other body format is nonempty. The strict contract requires every supplied body field to be nonempty.
 - `PATCH /api/conversations/v2/{conversationId}` and the manual state route do not support pagination query parameters. Current runtime can commit the mutation and then return `400` if an undocumented invalid `before` query is supplied during response hydration; do not attach read-pagination parameters to mutation requests.
-- Event publishing has no application-level dead-letter or terminal attempt limit. A poison or persistently unavailable event can block later sequence values for that conversation and sink.
+- Event publishing has no application-level dead-letter or terminal attempt limit. A poison or persistently unavailable event can block later sequence values for that conversation.
 - Event production and successful broker publication, headers, ordering, retry, and no-backfill behavior do not yet have end-to-end conformance tests against AsyncAPI.
 - Integration coverage confirms credential separation, structured identity validation, role separation, generic rejection, alias preservation, promotion of `V1`-tagged conversations, allowlist revocation behavior, fixed Reply-To base behavior, and token-based inbound routing.

@@ -134,7 +134,6 @@ Build a conversation-event evidence matrix for every event emitted through
 - Required, optional, and nullable payload fields
 - Exact actor/cause combinations and enumerations
 - NATS headers and JetStream message ID behavior
-- Kafka headers and record-key behavior
 - Delivery, deduplication, ordering, retry, and backfill semantics
 - Test coverage and gaps
 
@@ -165,12 +164,12 @@ Update `public/asyncapi.json` so it matches the supported event feed.
 
 Include:
 
-- NATS and Kafka servers, configurable channel addresses, and send operations
+- NATS servers, configurable channel addresses, and send operations
 - Every supported event as a uniquely discriminated message
 - Closed payload schemas, common application headers, and valid examples
-- Kafka record-key and NATS JetStream message-ID behavior
+- NATS JetStream message-ID behavior
 - At-least-once delivery, event-ID deduplication, per-conversation sequence,
-  independent sinks, and no-backfill guidance
+  and no-backfill guidance
 
 Keep the shared JSON payload schema transport-neutral. Describe protocol
 envelopes with bindings or channel/operation descriptions instead of adding
