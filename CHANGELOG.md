@@ -8,6 +8,8 @@ and this project uses [Semantic Versioning](https://semver.org/). See
 
 ## [Unreleased]
 
+## [0.7.0-rc.4] - 2026-08-28
+
 ### Added
 
 - Added an optional built-in cron scheduler that drains the shared email outbox
