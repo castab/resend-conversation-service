@@ -38,14 +38,38 @@ and this project uses [Semantic Versioning](https://semver.org/). See
   later version; the sink abstraction and the plural `CONVERSATION_EVENTS_SINKS`
   variable were kept for that.
 
-### Breaking
+### Upgrade notes
 
 - The `20260820000000_add_conversation_events` migration was rewritten in place
-  to create `ConversationEventSink` with `NATS` only. A database that already
-  applied it will fail `prisma migrate deploy` on a checksum mismatch and must
-  be recreated with `npx prisma migrate reset --force` rather than migrated
-  forward. This is acceptable only because the migration has shipped solely in
-  `0.7.0` release candidates.
+  to create `ConversationEventSink` with `NATS` only, rather than superseded by
+  a corrective migration. This is acceptable only because the migration has
+  shipped solely in `0.7.0` release candidates.
+- Upgrading needs no action. `prisma migrate deploy` treats the migration as
+  already applied and reports no pending migrations, so an existing database
+  deploys normally. A reset is not required.
+- An existing database does keep two harmless remnants: the unused `KAFKA`
+  value on the `ConversationEventSink` enum, and a now-stale checksum recorded
+  for that migration. Nothing can write the enum value, and the deploy path
+  does not read the checksum. A database created from scratch on this version
+  has neither.
+- To make an existing database match a fresh install, run this once. It is
+  optional, and the `DELETE` discards any conversation events still awaiting
+  delivery to a previously enabled Kafka sink:
+
+  ```sql
+  BEGIN;
+  DELETE FROM conversation_event_deliveries WHERE sink = 'KAFKA';
+  ALTER TYPE "ConversationEventSink" RENAME TO "ConversationEventSink_old";
+  CREATE TYPE "ConversationEventSink" AS ENUM ('NATS');
+  ALTER TABLE conversation_event_deliveries
+    ALTER COLUMN sink TYPE "ConversationEventSink"
+    USING sink::text::"ConversationEventSink";
+  DROP TYPE "ConversationEventSink_old";
+  UPDATE _prisma_migrations
+    SET checksum = 'e37980013dcab8b5ea7bc52dbffad8a530ae06bf06edda2405449eddb6740fee'
+    WHERE migration_name = '20260820000000_add_conversation_events';
+  COMMIT;
+  ```
 
 ## [0.7.0-rc.3] - 2026-08-20
 
