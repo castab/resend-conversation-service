@@ -37,7 +37,7 @@ export function initializeTelemetry(
     return;
   }
 
-  const endpoint = requiredMetricsEndpoint(
+  const endpoint = optionalMetricsEndpoint(
     environment.OTEL_EXPORTER_OTLP_METRICS_ENDPOINT,
   );
   const exportIntervalMillis = positiveInteger(
@@ -57,7 +57,7 @@ export function initializeTelemetry(
   }
 
   const reader = new PeriodicExportingMetricReader({
-    exporter: new OTLPMetricExporter({ url: endpoint }),
+    exporter: new OTLPMetricExporter(endpoint ? { url: endpoint } : {}),
     exportIntervalMillis,
     exportTimeoutMillis,
   });
@@ -90,12 +90,10 @@ export async function shutdownTelemetry() {
   await Promise.race([shutdown, timeout]);
 }
 
-function requiredMetricsEndpoint(value: string | undefined) {
+function optionalMetricsEndpoint(value: string | undefined) {
   const raw = value?.trim();
   if (!raw) {
-    throw new Error(
-      'Missing OTEL_EXPORTER_OTLP_METRICS_ENDPOINT for enabled telemetry',
-    );
+    return undefined;
   }
   let endpoint: URL;
   try {
@@ -103,17 +101,12 @@ function requiredMetricsEndpoint(value: string | undefined) {
   } catch {
     throw new Error('OTEL_EXPORTER_OTLP_METRICS_ENDPOINT must be a valid URL');
   }
-  if (
-    (endpoint.protocol !== 'http:' && endpoint.protocol !== 'https:') ||
-    endpoint.pathname !== '/v1/metrics' ||
-    endpoint.search ||
-    endpoint.hash
-  ) {
+  if (endpoint.protocol !== 'http:' && endpoint.protocol !== 'https:') {
     throw new Error(
-      'OTEL_EXPORTER_OTLP_METRICS_ENDPOINT must be an http(s) OTLP /v1/metrics URL',
+      'OTEL_EXPORTER_OTLP_METRICS_ENDPOINT must be an http(s) URL',
     );
   }
-  return endpoint.toString();
+  return raw;
 }
 
 function positiveInteger(

@@ -16,29 +16,29 @@ describe('telemetry configuration', () => {
     expect(telemetryEnabled()).toBe(false);
   });
 
-  it('requires an endpoint after telemetry is explicitly enabled', () => {
-    expect(() => initializeTelemetry({ TELEMETRY_ENABLED: 'true' })).toThrow(
-      'Missing OTEL_EXPORTER_OTLP_METRICS_ENDPOINT',
-    );
+  it('uses the exporter default when enabled without an endpoint', () => {
+    initializeTelemetry({ TELEMETRY_ENABLED: 'true' });
+
+    expect(telemetryEnabled()).toBe(true);
   });
 
-  it('rejects endpoints that are not exact OTLP metrics paths', () => {
-    expect(() =>
-      initializeTelemetry({
-        TELEMETRY_ENABLED: 'true',
-        OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: 'http://alloy:4318',
-      }),
-    ).toThrow('OTLP /v1/metrics URL');
-  });
-
-  it('enables metrics for a valid private collector endpoint', () => {
+  it('accepts a base collector URL without an OTLP metrics path', () => {
     initializeTelemetry({
       TELEMETRY_ENABLED: 'true',
-      OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: 'http://alloy:4318/v1/metrics',
+      OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: 'http://fluent-bit:4318',
       OTEL_DEPLOYMENT_ENVIRONMENT: 'test',
       HOSTNAME: 'test-instance',
     });
 
     expect(telemetryEnabled()).toBe(true);
+  });
+
+  it('rejects a configured endpoint that is not an HTTP(S) URL', () => {
+    expect(() =>
+      initializeTelemetry({
+        TELEMETRY_ENABLED: 'true',
+        OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: 'file:///tmp/metrics',
+      }),
+    ).toThrow('must be an http(s) URL');
   });
 });
