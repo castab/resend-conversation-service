@@ -310,10 +310,12 @@ docker compose --profile apps up --build
 ## Observability
 
 Metrics and log shipping are off by default. The application emits no telemetry
-unless `TELEMETRY_ENABLED=true`; when enabled it requires the exact private
-OTLP/HTTP metrics endpoint in `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` (for
-example `http://alloy:4318/v1/metrics`). A missing or malformed endpoint for an
-explicitly enabled configuration fails startup. Telemetry is never part of the
+unless `TELEMETRY_ENABLED=true`. When enabled, the OTLP exporter uses its
+default endpoint unless `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` supplies a private
+collector URL. A configured URL is used as supplied, so it may be a base URL
+such as `http://fluent-bit:4318` or a full metrics path such as
+`http://alloy:4318/v1/metrics`, depending on the collector. Only a malformed or
+non-HTTP(S) configured URL fails startup. Telemetry is never part of the
 readiness check.
 
 Application logs are JSON written to stdout. They contain only fixed event

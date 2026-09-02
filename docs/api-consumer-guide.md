@@ -1,6 +1,6 @@
 # API Consumer Guide
 
-Contract version: `0.7.0-rc.5`
+Contract version: `0.7.0-rc.6`
 
 ## Service purpose
 
@@ -580,7 +580,7 @@ curl -i \
 - Current conversation API: V2. Conversation API V1 was retired in 0.5.0 and its paths return `404`.
 - OpenAPI version: `3.1.1`.
 - AsyncAPI version: `3.1.0`; conversation event payload schema version: `1`.
-- Contract/package version observed in repository: `0.7.0-rc.5`.
+- Contract/package version observed in repository: `0.7.0-rc.6`.
 - No browser-safe authentication or correlation/request ID is defined.
 - Gateway exposure policy is deployment-owned and not included in this contract.
 - Topic lookup does not enforce the documented 255-character `externalTopicId` limit although create and assignment do; consumers must follow the stricter contract.

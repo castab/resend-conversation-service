@@ -1,6 +1,6 @@
 # API Agent Handoff
 
-Contract version: `0.7.0-rc.5`
+Contract version: `0.7.0-rc.6`
 
 ## Sources
 
@@ -172,9 +172,9 @@ Conversations created before the V1 retirement are still stored with `apiVersion
 8. Schedule the shared drain with the dedicated credential at `/api/emails/v2/outbox/drain`. It is the only drain route. The service may instead be configured to run that drain on its own internal cron schedule, which is disabled by default and does not change this contract.
 9. Sanitize response HTML.
 10. Validate request and response models against upstream OpenAPI contract
-    `0.7.0-rc.5`.
+    `0.7.0-rc.6`.
 11. If consuming conversation events, generate or validate handlers against
-    AsyncAPI contract `0.7.0-rc.5`, reject unsupported payload schema versions,
+    AsyncAPI contract `0.7.0-rc.6`, reject unsupported payload schema versions,
     and persist event IDs for deduplication.
 
 ## Known concerns

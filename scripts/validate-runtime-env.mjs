@@ -120,17 +120,14 @@ if (drainScheduleEnabled) {
 
 if ((process.env.TELEMETRY_ENABLED ?? '').trim().toLowerCase() === 'true') {
   const endpoint = process.env.OTEL_EXPORTER_OTLP_METRICS_ENDPOINT?.trim();
-  try {
-    const parsed = new URL(endpoint);
-    if (
-      (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') ||
-      parsed.pathname !== '/v1/metrics' ||
-      parsed.search ||
-      parsed.hash
-    ) {
+  if (endpoint) {
+    try {
+      const parsed = new URL(endpoint);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        fail('runtime_telemetry_endpoint_invalid');
+      }
+    } catch {
       fail('runtime_telemetry_endpoint_invalid');
     }
-  } catch {
-    fail('runtime_telemetry_endpoint_invalid');
   }
 }
