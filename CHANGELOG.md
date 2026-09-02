@@ -8,6 +8,14 @@ and this project uses [Semantic Versioning](https://semver.org/). See
 
 ## [Unreleased]
 
+## [0.7.0-rc.5] - 2026-09-01
+
+### Added
+
+- Added opt-in OpenTelemetry metrics and redacted structured JSON logs, plus an
+  optional Grafana Alloy, Prometheus, Loki, and Grafana Compose overlay for
+  local observability.
+
 ## [0.7.0-rc.4] - 2026-08-28
 
 ### Added
