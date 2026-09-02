@@ -1,0 +1,10 @@
+apiVersion: 1
+
+providers:
+  - name: resend-conversation-service
+    orgId: 1
+    folder: Resend Conversation Service
+    type: file
+    disableDeletion: true
+    options:
+      path: /var/lib/grafana/dashboards

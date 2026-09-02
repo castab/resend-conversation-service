@@ -7,6 +7,7 @@ import {
   StringCodec,
 } from 'nats';
 import type { PrismaClient } from '@/lib/database';
+import { recordConversationEventDelivery } from '@/lib/telemetry-metrics';
 import {
   type ConversationEventSinkName,
   getEnabledConversationEventSinks,
@@ -92,9 +93,11 @@ export class ConversationEventRuntime {
           try {
             await sink.publish(delivery);
             await acknowledgeDelivery(this.client, sink.name, delivery);
+            recordConversationEventDelivery('published');
           } catch (error) {
             cycleHealthy = false;
             await retryDelivery(this.client, sink.name, delivery, error);
+            recordConversationEventDelivery('retry_scheduled');
           }
         }
       }

@@ -11,7 +11,9 @@ import {
   Prisma,
 } from '@/lib/database';
 import { hashSendRequest } from '@/lib/email';
+import { logEvent } from '@/lib/logger';
 import { validateDirectEmailV2Body } from '@/lib/send-validation';
+import { recordEmailIntent } from '@/lib/telemetry-metrics';
 
 const IDENTITY_NOT_ALLOWED =
   'The requested email identity is not allowed. Contact the administrator.';
@@ -171,6 +173,10 @@ export async function sendDirectEmailV2(
     return replayResponse(message);
   }
 
+  recordEmailIntent(
+    'direct',
+    deliveryMode === 'outbox' ? 'outbox' : 'synchronous',
+  );
   if (deliveryMode === 'outbox') {
     return Response.json(
       { email: serializeDirectEmail(message) },
@@ -185,7 +191,7 @@ export async function sendDirectEmailV2(
       { status: 201 },
     );
   } catch {
-    console.error('Failed to send direct email');
+    logEvent('error', 'direct_email_send_failed');
     const failed = await client.emailMessage.findUniqueOrThrow({
       where: { id: message.id },
     });

@@ -307,6 +307,55 @@ The optional application Compose profile builds the production image:
 docker compose --profile apps up --build
 ```
 
+## Observability
+
+Metrics and log shipping are off by default. The application emits no telemetry
+unless `TELEMETRY_ENABLED=true`; when enabled it requires the exact private
+OTLP/HTTP metrics endpoint in `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` (for
+example `http://alloy:4318/v1/metrics`). A missing or malformed endpoint for an
+explicitly enabled configuration fails startup. Telemetry is never part of the
+readiness check.
+
+Application logs are JSON written to stdout. They contain only fixed event
+names and safe operational fields; they never include email addresses, message
+or conversation IDs, subjects, bodies, headers, credentials, provider payloads,
+raw URLs, or error messages. `LOG_LEVEL` defaults to `info`.
+
+Start the optional local demo after creating the usual `.env` file:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.observability.yml --profile apps up --build
+```
+
+It starts Grafana Alloy, Prometheus, Loki, and Grafana alongside the app.
+Grafana is available at `http://localhost:3001`; Prometheus and Loki are on
+ports 9090 and 3100. The demo provisions a service dashboard and alert rules,
+but intentionally does not configure an alert receiver.
+
+Alloy receives the application's OTLP metrics and remote-writes them to
+Prometheus. Prometheus therefore has one Alloy scrape target for agent health,
+not an application scrape target for every service. Alloy also reads stdout
+only from Docker containers carrying `observability.logs=true`, decodes the JSON
+events, and writes them to Loki. This keeps application-specific receiver setup
+out of the shared Prometheus and Loki instances.
+
+For production Docker hosts, run one Alloy agent per host on the private
+application network and point every opted-in application at that agent. Mount
+the Docker socket read-only, persist Alloy's data directory so log positions
+survive restarts, and expose OTLP only on the private network. Configure remote
+Prometheus/Loki URLs and credentials as Alloy secrets; do not pass backend
+credentials into the application. The included local Alloy configuration is a
+reference for the unauthenticated demo stack, not a production credential
+template.
+
+The first metric set covers HTTP traffic and duration, Resend provider calls,
+webhook outcomes, outbox drain outcomes/backlog age, conversation state counts,
+scheduled drain runs, and NATS delivery backlog. Attributes are intentionally
+limited to finite route templates, operation, outcome, state, event type, and
+sink values. The Grafana dashboard includes HTTP traffic/latency, outbox panels,
+and the application log stream; starter alerts cover missing telemetry, HTTP
+5xxs, stale or indeterminate outbox work, and stale NATS deliveries.
+
 ## Database Changes
 
 `prisma/schema.prisma` and `prisma/migrations` are the database sources of
