@@ -309,13 +309,9 @@ docker compose --profile apps up --build
 
 ## Observability
 
-Metrics and log shipping are off by default. The application emits no telemetry
-unless `TELEMETRY_ENABLED=true`. When enabled, the OTLP exporter uses its
-default endpoint unless `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` supplies a private
-collector URL. A configured URL is used as supplied, so it may be a base URL
-such as `http://fluent-bit:4318` or a full metrics path such as
-`http://alloy:4318/v1/metrics`, depending on the collector. Only a malformed or
-non-HTTP(S) configured URL fails startup. Telemetry is never part of the
+Metrics and OTLP log shipping are off by default. Set `TELEMETRY_ENABLED=true`
+and provide complete signal-specific OTLP/HTTP endpoints to send metrics
+directly to Prometheus and logs directly to Loki. Telemetry is never part of the
 readiness check.
 
 Application logs are JSON written to stdout. They contain only fixed event
@@ -329,26 +325,16 @@ Start the optional local demo after creating the usual `.env` file:
 docker compose -f docker-compose.yml -f docker-compose.observability.yml --profile apps up --build
 ```
 
-It starts Grafana Alloy, Prometheus, Loki, and Grafana alongside the app.
+It starts Prometheus, Loki, and Grafana alongside the app.
 Grafana is available at `http://localhost:3001`; Prometheus and Loki are on
 ports 9090 and 3100. The demo provisions a service dashboard and alert rules,
 but intentionally does not configure an alert receiver.
 
-Alloy receives the application's OTLP metrics and remote-writes them to
-Prometheus. Prometheus therefore has one Alloy scrape target for agent health,
-not an application scrape target for every service. Alloy also reads stdout
-only from Docker containers carrying `observability.logs=true`, decodes the JSON
-events, and writes them to Loki. This keeps application-specific receiver setup
-out of the shared Prometheus and Loki instances.
-
-For production Docker hosts, run one Alloy agent per host on the private
-application network and point every opted-in application at that agent. Mount
-the Docker socket read-only, persist Alloy's data directory so log positions
-survive restarts, and expose OTLP only on the private network. Configure remote
-Prometheus/Loki URLs and credentials as Alloy secrets; do not pass backend
-credentials into the application. The included local Alloy configuration is a
-reference for the unauthenticated demo stack, not a production credential
-template.
+Prometheus enables its native OTLP receiver and Loki enables native OTLP log
+ingestion with structured metadata. The application sends to both backends
+without Alloy, a Docker socket mount, stdout tailing, or a remote-write hop.
+`OTEL_RESOURCE_ATTRIBUTES` adds deployment tags to both signals; the included
+backends index a curated set of deployment dimensions for Grafana filtering.
 
 The first metric set covers HTTP traffic and duration, Resend provider calls,
 webhook outcomes, outbox drain outcomes/backlog age, conversation state counts,
@@ -357,6 +343,11 @@ limited to finite route templates, operation, outcome, state, event type, and
 sink values. The Grafana dashboard includes HTTP traffic/latency, outbox panels,
 and the application log stream; starter alerts cover missing telemetry, HTTP
 5xxs, stale or indeterminate outbox work, and stale NATS deliveries.
+
+[The observability guide](docs/observability.md) documents exact endpoint paths,
+Prometheus and Loki setup, authentication headers, tag and cardinality behavior,
+Grafana queries, local verification, Railway variables, and the tradeoffs of
+direct in-process export.
 
 ## Database Changes
 

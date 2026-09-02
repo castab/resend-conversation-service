@@ -12,7 +12,7 @@ if (!health.ok) {
 
 await waitFor('Prometheus application metric', async () => {
   const response = await fetch(
-    `${prometheusUrl}/api/v1/query?query=${encodeURIComponent('http_server_request_count_total')}`,
+    `${prometheusUrl}/api/v1/query?query=${encodeURIComponent('http_server_request_duration_seconds_count{service_name="resend-conversation-service",deployment_environment_name="local",service_group="resend-conversation-service",vcs_revision="local"}')}`,
   );
   if (!response.ok) {
     return false;
@@ -25,7 +25,7 @@ await waitFor('Loki application log', async () => {
   const end = Date.now() * 1_000_000;
   const start = end - 120_000_000_000;
   const response = await fetch(
-    `${lokiUrl}/loki/api/v1/query_range?query=${encodeURIComponent('{service_name="app"}')}&start=${start}&end=${end}&limit=100`,
+    `${lokiUrl}/loki/api/v1/query_range?query=${encodeURIComponent('{service_name="resend-conversation-service",deployment_environment_name="local",service_group="resend-conversation-service",vcs_revision="local"}')}&start=${start}&end=${end}&limit=100`,
   );
   if (!response.ok) {
     return false;

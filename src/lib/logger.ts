@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import { trace } from '@opentelemetry/api';
 import pino, { type DestinationStream, type Logger } from 'pino';
+import { emitTelemetryLog } from './telemetry';
 
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 type LogValue = boolean | number | string | undefined;
@@ -92,5 +93,23 @@ export function logEvent(
   event: string,
   attributes: SafeLogAttributes = {},
 ) {
+  if (!logger.isLevelEnabled(level)) {
+    return;
+  }
   logger[level]({ event, ...attributes }, event);
+  const context = requestContext.getStore();
+  emitTelemetryLog(level, event, {
+    event,
+    ...definedAttributes(attributes),
+    ...(context ? { request_id: context.requestId } : {}),
+  });
+}
+
+function definedAttributes(attributes: SafeLogAttributes) {
+  return Object.fromEntries(
+    Object.entries(attributes).filter(
+      (entry): entry is [string, boolean | number | string] =>
+        entry[1] !== undefined,
+    ),
+  );
 }
