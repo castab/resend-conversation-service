@@ -7,6 +7,8 @@ import {
   isDomainEvent,
   isEmailEvent,
 } from '@/lib/email';
+import { logEvent } from '@/lib/logger';
+import { recordWebhookEvent } from '@/lib/telemetry-metrics';
 import { verifyWebhook, type WebhookHeaders } from '@/lib/verify-webhook';
 
 export interface WebhookHandlers<TClient> {
@@ -36,7 +38,8 @@ export function createWebhookHandler<TClient>(
     const secret = process.env.RESEND_WEBHOOK_SECRET;
 
     if (!secret) {
-      console.error('Missing RESEND_WEBHOOK_SECRET environment variable');
+      logEvent('error', 'webhook_configuration_missing');
+      recordWebhookEvent('unknown', 'failed');
       return Response.json(
         { error: 'Server misconfiguration' },
         { status: 500 },
@@ -48,6 +51,7 @@ export function createWebhookHandler<TClient>(
     const svixSignature = request.headers.get('svix-signature');
 
     if (!svixId || !svixTimestamp || !svixSignature) {
+      recordWebhookEvent('unknown', 'rejected');
       return Response.json(
         { error: 'Missing required Svix headers' },
         { status: 400 },
@@ -64,7 +68,8 @@ export function createWebhookHandler<TClient>(
     const result = verifyWebhook(rawBody, headers, secret);
 
     if (!result.success) {
-      console.error('Webhook verification failed:', result.error);
+      logEvent('warn', 'webhook_verification_failed');
+      recordWebhookEvent('unknown', 'rejected');
       return Response.json(
         { error: 'Invalid webhook signature' },
         { status: 401 },
@@ -79,30 +84,49 @@ export function createWebhookHandler<TClient>(
 
       if (isEmailEvent(event)) {
         await handlers.insertEmailEvent(client, event, svixId);
+        recordWebhookEvent('email', 'accepted');
       } else if (isContactEvent(event)) {
         await handlers.insertContactEvent(client, event, svixId);
+        recordWebhookEvent('contact', 'accepted');
       } else if (isDomainEvent(event)) {
         await handlers.insertDomainEvent(client, event, svixId);
+        recordWebhookEvent('domain', 'accepted');
       } else {
         const _exhaustiveCheck: never = event;
-        console.warn('Unknown event type:', _exhaustiveCheck);
+        void _exhaustiveCheck;
+        logEvent('warn', 'webhook_event_type_unknown');
+        recordWebhookEvent('unknown', 'rejected');
         return Response.json({ error: 'Unknown event type' }, { status: 400 });
       }
 
       return Response.json({ received: true }, { status: 200 });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
-      console.error('Database insertion failed:', message);
+    } catch {
+      logEvent('error', 'webhook_projection_failed');
+      recordWebhookEvent(webhookEventCategory(event), 'failed');
       return Response.json(
         { error: 'Failed to process webhook' },
         { status: 500 },
       );
     } finally {
       if (client && handlers.cleanup) {
-        await handlers.cleanup(client).catch(console.error);
+        await handlers.cleanup(client).catch(() => {
+          logEvent('error', 'webhook_cleanup_failed');
+        });
       }
     }
   };
+}
+
+function webhookEventCategory(
+  event: EmailWebhookEvent | ContactWebhookEvent | DomainWebhookEvent,
+): 'email' | 'contact' | 'domain' {
+  if (isEmailEvent(event)) {
+    return 'email';
+  }
+  if (isContactEvent(event)) {
+    return 'contact';
+  }
+  return 'domain';
 }
 
 // Helper to prepare email event data for insertion

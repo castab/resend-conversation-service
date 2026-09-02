@@ -10,6 +10,13 @@ function resolveEmailV2ApiKey(environment = process.env) {
   return environment.EMAIL_v2_API_KEY || environment.EMAIL_V2_API_KEY;
 }
 
+function fail(event, attributes = {}) {
+  process.stderr.write(
+    `${JSON.stringify({ level: 50, time: Date.now(), event, ...attributes })}\n`,
+  );
+  process.exit(1);
+}
+
 function isValidReplyToBaseAddress(address) {
   const normalized = address.trim().toLowerCase();
   const at = normalized.lastIndexOf('@');
@@ -55,17 +62,11 @@ if (!resolveEmailV2ApiKey()) {
 }
 
 if (missing.length > 0) {
-  console.error(
-    `Missing required runtime environment variables: ${missing.join(', ')}`,
-  );
-  process.exit(1);
+  fail('runtime_environment_missing', { variables: missing.join(',') });
 }
 
 if (!isValidReplyToBaseAddress(process.env.RESEND_REPLY_TO)) {
-  console.error(
-    'Invalid RESEND_REPLY_TO runtime environment variable: expected an untagged mailbox address on a receiving domain',
-  );
-  process.exit(1);
+  fail('runtime_reply_to_invalid');
 }
 
 const eventSinks = (process.env.CONVERSATION_EVENTS_SINKS ?? '')
@@ -73,8 +74,7 @@ const eventSinks = (process.env.CONVERSATION_EVENTS_SINKS ?? '')
   .map((value) => value.trim().toLowerCase())
   .filter(Boolean);
 if (eventSinks.some((sink) => sink !== 'nats')) {
-  console.error('CONVERSATION_EVENTS_SINKS must contain only nats');
-  process.exit(1);
+  fail('runtime_conversation_event_sinks_invalid');
 }
 if (eventSinks.includes('nats')) {
   for (const name of [
@@ -83,8 +83,7 @@ if (eventSinks.includes('nats')) {
     'CONVERSATION_EVENTS_NATS_SUBJECT',
   ]) {
     if (!process.env[name]) {
-      console.error(`Missing ${name} for enabled NATS conversation events`);
-      process.exit(1);
+      fail('runtime_conversation_events_configuration_missing', { name });
     }
   }
 }
@@ -92,23 +91,16 @@ const drainScheduleEnabled = (
   process.env.OUTBOX_DRAIN_SCHEDULE_ENABLED ?? ''
 ).trim();
 if (drainScheduleEnabled && drainScheduleEnabled.toLowerCase() !== 'true') {
-  console.error('OUTBOX_DRAIN_SCHEDULE_ENABLED must be true when set');
-  process.exit(1);
+  fail('runtime_outbox_schedule_enabled_invalid');
 }
 if (drainScheduleEnabled) {
   const expression = (process.env.OUTBOX_DRAIN_SCHEDULE ?? '').trim();
   if (!expression) {
-    console.error(
-      'Missing OUTBOX_DRAIN_SCHEDULE for the enabled outbox drain scheduler',
-    );
-    process.exit(1);
+    fail('runtime_outbox_schedule_missing');
   }
   const fields = expression.split(/\s+/).length;
   if (fields !== 5 && fields !== 6) {
-    console.error(
-      'OUTBOX_DRAIN_SCHEDULE must be a cron expression with 5 or 6 fields',
-    );
-    process.exit(1);
+    fail('runtime_outbox_schedule_invalid');
   }
   const bounded = [
     ['OUTBOX_DRAIN_SCHEDULE_BATCH_SIZE', 1, 100],
@@ -121,10 +113,24 @@ if (drainScheduleEnabled) {
     }
     const value = Number(raw);
     if (!Number.isInteger(value) || value < minimum || value > maximum) {
-      console.error(
-        `${name} must be an integer between ${minimum} and ${maximum}`,
-      );
-      process.exit(1);
+      fail('runtime_outbox_schedule_bound_invalid', { name });
     }
+  }
+}
+
+if ((process.env.TELEMETRY_ENABLED ?? '').trim().toLowerCase() === 'true') {
+  const endpoint = process.env.OTEL_EXPORTER_OTLP_METRICS_ENDPOINT?.trim();
+  try {
+    const parsed = new URL(endpoint);
+    if (
+      (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') ||
+      parsed.pathname !== '/v1/metrics' ||
+      parsed.search ||
+      parsed.hash
+    ) {
+      fail('runtime_telemetry_endpoint_invalid');
+    }
+  } catch {
+    fail('runtime_telemetry_endpoint_invalid');
   }
 }

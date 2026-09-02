@@ -1,0 +1,13 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/rules.yml
+
+scrape_configs:
+  # Prometheus knows only the shared Alloy agent; application metrics arrive
+  # through Alloy remote write rather than per-application scrape jobs.
+  - job_name: alloy
+    static_configs:
+      - targets: [alloy:12345]

@@ -19,6 +19,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:postgresql": "vitest run tests/integration/webhook.postgresql.test.ts tests/integration/conversation.postgresql.test.ts tests/integration/direct-email.postgresql.test.ts",
+    "telemetry:smoke": "node scripts/telemetry-smoke.mjs",
     "db:generate": "prisma generate",
     "db:migrate:deploy": "prisma migrate deploy",
     "db:setup": "npm run db:generate && npm run db:migrate:deploy",
@@ -26,6 +27,10 @@
     "db:validate": "prisma validate"
   },
   "dependencies": {
+    "@opentelemetry/api": "1.9.1",
+    "@opentelemetry/exporter-metrics-otlp-proto": "0.222.0",
+    "@opentelemetry/resources": "2.11.0",
+    "@opentelemetry/sdk-metrics": "2.11.0",
     "@prisma/adapter-pg": "7.8.0",
     "@prisma/client": "7.8.0",
     "croner": "10.0.1",
@@ -33,6 +38,7 @@
     "express": "5.2.1",
     "nats": "^2.29.3",
     "pg": "8.13.1",
+    "pino": "10.3.1",
     "prisma": "7.8.0",
     "svix": "1.67.0",
     "swagger-ui-dist": "5.32.1"

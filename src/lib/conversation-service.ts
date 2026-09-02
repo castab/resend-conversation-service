@@ -6,6 +6,7 @@ import {
   recordOutboundInternetMessageId,
   type SendEmailInput,
 } from '@/lib/email';
+import { logEvent } from '@/lib/logger';
 
 const SENT_METADATA_RETRY_DELAYS_MS = [0, 100, 250] as const;
 
@@ -108,10 +109,9 @@ async function hydrateSentMetadata(
     }
   }
 
-  console.warn(
-    'Sent email metadata is not available yet:',
-    lastError instanceof Error ? lastError.message : 'Unknown error',
-  );
+  logEvent('warn', 'sent_email_metadata_unavailable', {
+    error_type: lastError instanceof Error ? lastError.name : 'unknown_error',
+  });
   return message;
 }
 

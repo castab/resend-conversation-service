@@ -1,3 +1,5 @@
+import { recordProviderRequest } from '@/lib/telemetry-metrics';
+
 export interface SendEmailInput {
   from: string;
   to: string[];
@@ -52,49 +54,67 @@ export function createResendEmailClient({
   apiKey: string;
   baseUrl?: string;
 }): ResendEmailClient {
-  async function request<T>(path: string, init?: RequestInit): Promise<T> {
-    const response = await fetch(`${baseUrl}${path}`, {
-      ...init,
-      headers: {
-        authorization: `Bearer ${apiKey}`,
-        'content-type': 'application/json',
-        'user-agent': 'resend-conversation-service/2.0',
-        ...init?.headers,
-      },
-      signal: AbortSignal.timeout(15_000),
-    });
+  async function request<T>(
+    operation: 'send' | 'send_batch' | 'get_sent' | 'get_received',
+    path: string,
+    init?: RequestInit,
+  ): Promise<T> {
+    const startedAt = performance.now();
+    let outcome: 'success' | 'failure' = 'failure';
+    let statusClass: 'none' | '2xx' | '4xx' | '5xx' = 'none';
+    try {
+      const response = await fetch(`${baseUrl}${path}`, {
+        ...init,
+        headers: {
+          authorization: `Bearer ${apiKey}`,
+          'content-type': 'application/json',
+          'user-agent': 'resend-conversation-service/2.0',
+          ...init?.headers,
+        },
+        signal: AbortSignal.timeout(15_000),
+      });
+      statusClass = responseStatusClass(response.status);
 
-    if (!response.ok) {
-      const responseBody = await response.text();
-      let code: string | null = null;
-      try {
-        const body = JSON.parse(responseBody) as {
-          name?: unknown;
-          code?: unknown;
-        };
-        code =
-          typeof body.name === 'string'
-            ? body.name
-            : typeof body.code === 'string'
-              ? body.code
-              : null;
-      } catch {
-        // Non-JSON errors still retain their status for retry classification.
+      if (!response.ok) {
+        const responseBody = await response.text();
+        let code: string | null = null;
+        try {
+          const body = JSON.parse(responseBody) as {
+            name?: unknown;
+            code?: unknown;
+          };
+          code =
+            typeof body.name === 'string'
+              ? body.name
+              : typeof body.code === 'string'
+                ? body.code
+                : null;
+        } catch {
+          // Non-JSON errors still retain their status for retry classification.
+        }
+        throw new ResendApiError(
+          `Resend API request failed with status ${response.status}`,
+          response.status,
+          responseBody,
+          code,
+        );
       }
-      throw new ResendApiError(
-        `Resend API request failed with status ${response.status}`,
-        response.status,
-        responseBody,
-        code,
+
+      outcome = 'success';
+      return (await response.json()) as T;
+    } finally {
+      recordProviderRequest(
+        (performance.now() - startedAt) / 1_000,
+        operation,
+        outcome,
+        statusClass,
       );
     }
-
-    return (await response.json()) as T;
   }
 
   return {
     async send(input, idempotencyKey) {
-      const result = await request<unknown>('/emails', {
+      const result = await request<unknown>('send', '/emails', {
         method: 'POST',
         headers: { 'idempotency-key': idempotencyKey },
         body: JSON.stringify(input),
@@ -111,21 +131,42 @@ export function createResendEmailClient({
       return { id: result.id };
     },
     sendBatch(input, idempotencyKey) {
-      return request<{ data: Array<{ id: string }> }>('/emails/batch', {
-        method: 'POST',
-        headers: { 'idempotency-key': idempotencyKey },
-        body: JSON.stringify(input),
-      });
+      return request<{ data: Array<{ id: string }> }>(
+        'send_batch',
+        '/emails/batch',
+        {
+          method: 'POST',
+          headers: { 'idempotency-key': idempotencyKey },
+          body: JSON.stringify(input),
+        },
+      );
     },
     getSent(id) {
-      return request<ResendEmail>(`/emails/${encodeURIComponent(id)}`);
+      return request<ResendEmail>(
+        'get_sent',
+        `/emails/${encodeURIComponent(id)}`,
+      );
     },
     getReceived(id) {
       return request<ResendEmail>(
+        'get_received',
         `/emails/receiving/${encodeURIComponent(id)}?html_format=cid`,
       );
     },
   };
+}
+
+function responseStatusClass(status: number): 'none' | '2xx' | '4xx' | '5xx' {
+  if (status >= 200 && status < 300) {
+    return '2xx';
+  }
+  if (status >= 400 && status < 500) {
+    return '4xx';
+  }
+  if (status >= 500 && status < 600) {
+    return '5xx';
+  }
+  return 'none';
 }
 
 export function getConfiguredResendClient(): ResendEmailClient {

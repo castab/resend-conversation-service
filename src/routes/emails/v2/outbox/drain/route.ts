@@ -1,6 +1,8 @@
 import { authorizeOutboxDrain, isRecord, readJson } from '@/lib/api';
 import { getPrismaClient } from '@/lib/database';
+import { logEvent } from '@/lib/logger';
 import { drainEmailOutbox } from '@/lib/outbox-service';
+import { recordOutboxDrain } from '@/lib/telemetry-metrics';
 
 export async function POST(request: Request) {
   const unauthorized = authorizeOutboxDrain(request);
@@ -32,12 +34,14 @@ export async function POST(request: Request) {
   }
 
   try {
-    return Response.json(await drainEmailOutbox(getPrismaClient(), limit));
+    const startedAt = performance.now();
+    const result = await drainEmailOutbox(getPrismaClient(), limit);
+    recordOutboxDrain((performance.now() - startedAt) / 1_000, result);
+    return Response.json(result);
   } catch (error) {
-    console.error(
-      'Failed to drain email outbox:',
-      error instanceof Error ? error.message : 'Unknown error',
-    );
+    logEvent('error', 'outbox_drain_failed', {
+      error_type: error instanceof Error ? error.name : 'unknown_error',
+    });
     return Response.json(
       { error: 'Failed to drain email outbox' },
       { status: 500 },

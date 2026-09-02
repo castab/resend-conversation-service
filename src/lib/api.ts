@@ -10,6 +10,7 @@ import {
   serializeConversationState,
 } from '@/lib/email';
 import { resolveEmailV2ApiKey } from '@/lib/environment';
+import { logEvent } from '@/lib/logger';
 
 export function authorizeEmailV2(request: Request): Response | null {
   return authorizeWithCredential(
@@ -33,7 +34,9 @@ function authorizeWithCredential(
   variableName: string,
 ): Response | null {
   if (!expected) {
-    console.error(`Missing ${variableName} environment variable`);
+    logEvent('error', 'api_credential_configuration_missing', {
+      credential: variableName,
+    });
     return Response.json({ error: 'Server misconfiguration' }, { status: 500 });
   }
 

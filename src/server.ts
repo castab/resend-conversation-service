@@ -13,10 +13,21 @@ import {
   stopConversationEventRuntime,
 } from '@/lib/conversation-event-runtime';
 import { getPrismaClient } from '@/lib/database';
+import { logEvent, runWithRequestContext } from '@/lib/logger';
 import {
   startOutboxDrainScheduler,
   stopOutboxDrainScheduler,
 } from '@/lib/outbox-drain-scheduler';
+import {
+  initializeTelemetry,
+  shutdownTelemetry,
+  telemetryEnabled,
+} from '@/lib/telemetry';
+import {
+  changeHttpActive,
+  recordHttpRequest,
+  registerDatabaseGauges,
+} from '@/lib/telemetry-metrics';
 import { POST as enqueueMessageV2 } from '@/routes/conversations/v2/[conversationId]/messages/outbox/route';
 import { POST as sendMessageV2 } from '@/routes/conversations/v2/[conversationId]/messages/route';
 import {
@@ -123,6 +134,34 @@ function adapt(handler: Route): RequestHandler {
 export function createApp() {
   const app = express();
   app.disable('x-powered-by');
+  app.use((request, response, next) => {
+    runWithRequestContext(() => {
+      const startedAt = performance.now();
+      const activeAttributes = {
+        'http.request.method': knownHttpMethod(request.method),
+        'url.scheme': 'http',
+      };
+      changeHttpActive(1, activeAttributes);
+      response.once('finish', () => {
+        changeHttpActive(-1, activeAttributes);
+        const route = matchedRoute(request);
+        const durationSeconds = (performance.now() - startedAt) / 1_000;
+        const attributes = {
+          ...activeAttributes,
+          'http.route': route,
+          'http.response.status_code': response.statusCode,
+        };
+        recordHttpRequest(durationSeconds, attributes);
+        logEvent('info', 'http_request_completed', {
+          method: request.method,
+          route,
+          status_code: response.statusCode,
+          duration_ms: Math.round(durationSeconds * 1_000),
+        });
+      });
+      next();
+    });
+  });
 
   app.get('/api/health/v2', adapt(healthV2));
   app.post('/api/webhooks/resend/v1', rawBody, adapt(webhook));
@@ -265,7 +304,7 @@ export function createApp() {
       response.status(413).json({ error: 'Request body is too large' });
       return;
     }
-    console.error('Request processing failed');
+    logEvent('error', 'http_request_processing_failed');
     response.status(500).json({ error: 'Internal server error' });
   };
   app.use(errors);
@@ -278,24 +317,31 @@ if (process.env.NODE_ENV !== 'test') {
 
 async function startServer() {
   try {
+    initializeTelemetry();
     const client = getPrismaClient();
+    if (telemetryEnabled()) {
+      registerDatabaseGauges(client);
+    }
     await startConversationEventRuntime(client);
     startOutboxDrainScheduler(client);
     const port = Number(process.env.PORT ?? 3000);
     const host = process.env.HOST ?? process.env.HOSTNAME ?? '0.0.0.0';
-    const server = createServer(createApp()).listen(port, host, () =>
-      console.info(`resend-conversation-service listening on ${host}:${port}`),
-    );
+    const server = createServer(createApp()).listen(port, host, () => {
+      logEvent('info', 'application_listening', { port });
+    });
     let closing = false;
     const shutdown = () => {
       if (closing) {
         return;
       }
       closing = true;
+      logEvent('info', 'application_shutdown_started');
       server.close(async () => {
         await stopOutboxDrainScheduler();
         await stopConversationEventRuntime();
+        await shutdownTelemetry();
         await client.$disconnect();
+        logEvent('info', 'application_shutdown_completed');
         process.exit(0);
       });
       setTimeout(() => process.exit(1), 10_000).unref();
@@ -303,11 +349,35 @@ async function startServer() {
     process.on('SIGTERM', shutdown);
     process.on('SIGINT', shutdown);
   } catch (error) {
-    const details =
-      error instanceof Error
-        ? `${error.name}: ${error.message}`
-        : String(error);
-    console.error(`Application startup failed: ${details}`);
+    logEvent('error', 'application_startup_failed', {
+      error_type: error instanceof Error ? error.name : 'unknown_error',
+    });
+    await shutdownTelemetry();
     process.exit(1);
   }
+}
+
+function matchedRoute(request: Request) {
+  const route = request.route?.path;
+  if (typeof route !== 'string') {
+    return '/unmatched';
+  }
+  return `${request.baseUrl}${route}` || '/';
+}
+
+function knownHttpMethod(method: string) {
+  return [
+    'CONNECT',
+    'DELETE',
+    'GET',
+    'HEAD',
+    'OPTIONS',
+    'PATCH',
+    'POST',
+    'PUT',
+    'QUERY',
+    'TRACE',
+  ].includes(method)
+    ? method
+    : '_OTHER';
 }

@@ -1,6 +1,11 @@
 import { Cron } from 'croner';
 import type { PrismaClient } from '@/lib/database';
+import { logEvent } from '@/lib/logger';
 import { drainEmailOutbox } from '@/lib/outbox-service';
+import {
+  recordOutboxDrain,
+  recordScheduledDrain,
+} from '@/lib/telemetry-metrics';
 
 const DEFAULT_TIMEZONE = 'UTC';
 const DEFAULT_BATCH_SIZE = 100;
@@ -74,11 +79,21 @@ export async function runScheduledDrain(
   client: PrismaClient,
   schedule: OutboxDrainSchedule,
 ) {
-  for (let batch = 0; batch < schedule.maxBatches; batch += 1) {
-    const result = await drainEmailOutbox(client, schedule.batchSize);
-    if (result.claimed === 0) {
-      return;
+  const startedAt = performance.now();
+  let outcome: 'success' | 'failure' = 'failure';
+  try {
+    for (let batch = 0; batch < schedule.maxBatches; batch += 1) {
+      const drainStartedAt = performance.now();
+      const result = await drainEmailOutbox(client, schedule.batchSize);
+      recordOutboxDrain((performance.now() - drainStartedAt) / 1_000, result);
+      if (result.claimed === 0) {
+        outcome = 'success';
+        return;
+      }
     }
+    outcome = 'success';
+  } finally {
+    recordScheduledDrain((performance.now() - startedAt) / 1_000, outcome);
   }
 }
 
@@ -102,21 +117,15 @@ export function startOutboxDrainScheduler(client: PrismaClient) {
         // absorbs transient provider failures through its own retry
         // scheduling, and cycling the container on one bad tick would be
         // worse than skipping it. Never log message content.
-        console.error(
-          `Scheduled outbox drain failed: ${
-            error instanceof Error
-              ? `${error.name}: ${error.message}`
-              : 'Unknown error'
-          }`,
-        );
+        logEvent('error', 'scheduled_outbox_drain_failed', {
+          error_type: error instanceof Error ? error.name : 'unknown_error',
+        });
       } finally {
         running = false;
       }
     },
   );
-  console.info(
-    `Scheduled outbox drain enabled (${schedule.expression}, ${schedule.timezone})`,
-  );
+  logEvent('info', 'scheduled_outbox_drain_enabled');
 }
 
 export async function stopOutboxDrainScheduler() {

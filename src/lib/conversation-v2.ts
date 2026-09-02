@@ -27,12 +27,14 @@ import {
   markConversationAwaitingParticipant,
   normalizeSubject,
 } from '@/lib/email';
+import { logEvent } from '@/lib/logger';
 import {
   type CreateConversationV2Input,
   type MessageV2Input,
   validateCreateV2Body,
   validateMessageV2Body,
 } from '@/lib/send-validation';
+import { recordEmailIntent } from '@/lib/telemetry-metrics';
 
 const IDENTITY_NOT_ALLOWED =
   'The requested email identity is not allowed. Contact the administrator.';
@@ -254,6 +256,7 @@ export async function createConversationV2(request: Request, queued: boolean) {
     }
   }
 
+  recordEmailIntent('conversation', queued ? 'outbox' : 'synchronous');
   return queued
     ? queuedResponse(client, created.conversationId, created.messageId)
     : deliverResponse(
@@ -491,10 +494,9 @@ export async function createMessageV2(
   try {
     parentInternetMessageId = await ensureInternetMessageId(client, parent.id);
   } catch (error) {
-    console.error(
-      'Failed to retrieve reply parent metadata:',
-      error instanceof Error ? error.message : 'Unknown error',
-    );
+    logEvent('error', 'reply_parent_metadata_unavailable', {
+      error_type: error instanceof Error ? error.name : 'unknown_error',
+    });
     return Response.json(
       { error: 'Reply parent threading metadata is unavailable' },
       { status: 503 },
@@ -624,6 +626,7 @@ export async function createMessageV2(
     throw error;
   }
 
+  recordEmailIntent('conversation', queued ? 'outbox' : 'synchronous');
   return queued
     ? Response.json(
         { conversationId, message: serializeMessage(pending) },
@@ -704,10 +707,10 @@ async function deliverResponse(
       { status: 201 },
     );
   } catch (error) {
-    console.error(
-      `Failed to send ${operation}:`,
-      error instanceof Error ? error.message : 'Unknown error',
-    );
+    logEvent('error', 'conversation_email_send_failed', {
+      operation,
+      error_type: error instanceof Error ? error.name : 'unknown_error',
+    });
     const message = await client.emailMessage.findUniqueOrThrow({
       where: { id: messageId },
     });
