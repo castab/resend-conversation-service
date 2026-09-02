@@ -2,7 +2,7 @@ groups:
   - name: resend-conversation-service
     rules:
       - alert: ResendConversationServiceTelemetryMissing
-        expr: absent_over_time(resend_conversation_runtime_info[10m])
+        expr: absent_over_time(resend_conversation_runtime_info{service_name="resend-conversation-service"}[10m])
         for: 5m
         labels:
           severity: warning
@@ -11,10 +11,17 @@ groups:
 
       - alert: ResendConversationServiceHttpErrors
         expr: |
-          sum(rate(http_server_request_count_total{http_response_status_code=~"5.."}[5m]))
+          sum by (service_name, deployment_environment_name, service_group, vcs_revision) (
+            rate(http_server_request_count_total{service_name="resend-conversation-service",http_response_status_code=~"5.."}[5m])
+          )
           /
-          sum(rate(http_server_request_count_total[5m])) > 0.05
-          and sum(rate(http_server_request_count_total[5m])) > 0.05
+          sum by (service_name, deployment_environment_name, service_group, vcs_revision) (
+            rate(http_server_request_count_total{service_name="resend-conversation-service"}[5m])
+          ) > 0.05
+          and
+          sum by (service_name, deployment_environment_name, service_group, vcs_revision) (
+            rate(http_server_request_count_total{service_name="resend-conversation-service"}[5m])
+          ) > 0.05
         for: 10m
         labels:
           severity: warning
@@ -22,7 +29,7 @@ groups:
           summary: Resend conversation service HTTP 5xx rate exceeds five percent.
 
       - alert: ResendConversationServiceOutboxStalled
-        expr: resend_conversation_outbox_oldest_pending_age > 600
+        expr: resend_conversation_outbox_oldest_pending_age_seconds{service_name="resend-conversation-service"} > 600
         for: 10m
         labels:
           severity: warning
@@ -30,7 +37,7 @@ groups:
           summary: Resend conversation service has pending outbox work older than ten minutes.
 
       - alert: ResendConversationServiceOutboxIndeterminate
-        expr: increase(resend_conversation_outbox_message_count_total{outcome="indeterminate"}[15m]) > 0
+        expr: increase(resend_conversation_outbox_message_count_total{service_name="resend-conversation-service",outcome="indeterminate"}[15m]) > 0
         for: 0m
         labels:
           severity: critical
@@ -38,7 +45,7 @@ groups:
           summary: Resend conversation service has indeterminate outbox messages.
 
       - alert: ResendConversationServiceNatsDeliveryStalled
-        expr: resend_conversation_conversation_event_delivery_oldest_pending_age{sink="nats"} > 300
+        expr: resend_conversation_conversation_event_delivery_oldest_pending_age_seconds{service_name="resend-conversation-service",sink="nats"} > 300
         for: 10m
         labels:
           severity: warning

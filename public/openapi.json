@@ -2,7 +2,7 @@
   "openapi": "3.1.1",
   "info": {
     "title": "resend-conversation-service API",
-    "version": "0.7.0-rc.6",
+    "version": "0.7.0-rc.7",
     "description": "Receives signed Resend webhooks and provides bearer-authenticated topic-centered conversations plus synchronous and queued direct email. Conversation API v2 is the only conversation contract; conversation API v1 was retired in 0.5.0 and its paths are no longer routed. The service persists outbound intent before contacting Resend, preserves RFC reply relationships for conversations, and stores untrusted email content without retrieving attachments. The separate AsyncAPI contract for conversation lifecycle events is available from the deployed service at `/asyncapi.json`.",
     "license": {
       "name": "MIT",

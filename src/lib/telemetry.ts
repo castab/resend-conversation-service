@@ -1,6 +1,18 @@
 import { type Meter, metrics } from '@opentelemetry/api';
+import {
+  type Logger as OpenTelemetryLogger,
+  SeverityNumber,
+} from '@opentelemetry/api-logs';
+import { OTLPLogExporter } from '@opentelemetry/exporter-logs-otlp-proto';
 import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-proto';
-import { resourceFromAttributes } from '@opentelemetry/resources';
+import {
+  type Resource,
+  resourceFromAttributes,
+} from '@opentelemetry/resources';
+import {
+  BatchLogRecordProcessor,
+  LoggerProvider,
+} from '@opentelemetry/sdk-logs';
 import {
   MeterProvider,
   PeriodicExportingMetricReader,
@@ -13,10 +25,12 @@ const DEFAULT_EXPORT_TIMEOUT_MS = 10_000;
 const SHUTDOWN_TIMEOUT_MS = 10_000;
 
 let meter: Meter = metrics.getMeter(METER_NAME, packageJson.version);
-let provider: MeterProvider | null = null;
+let meterProvider: MeterProvider | null = null;
+let loggerProvider: LoggerProvider | null = null;
+let telemetryLogger: OpenTelemetryLogger | null = null;
 
 export function telemetryEnabled() {
-  return provider !== null;
+  return meterProvider !== null;
 }
 
 export function getTelemetryMeter() {
@@ -24,8 +38,8 @@ export function getTelemetryMeter() {
 }
 
 /**
- * Enables metric export only after an operator explicitly opts in. The rest of
- * the application uses the OpenTelemetry no-op meter while it is disabled.
+ * Enables telemetry only after an operator explicitly opts in. The rest of the
+ * application uses no-op OpenTelemetry objects while telemetry is disabled.
  */
 export function initializeTelemetry(
   environment: NodeJS.ProcessEnv = process.env,
@@ -33,12 +47,29 @@ export function initializeTelemetry(
   if (environment.TELEMETRY_ENABLED?.trim().toLowerCase() !== 'true') {
     return;
   }
-  if (provider) {
+  if (meterProvider) {
     return;
   }
 
-  const endpoint = optionalMetricsEndpoint(
-    environment.OTEL_EXPORTER_OTLP_METRICS_ENDPOINT,
+  const baseEndpoint = optionalHttpEndpoint(
+    environment.OTEL_EXPORTER_OTLP_ENDPOINT,
+    'OTEL_EXPORTER_OTLP_ENDPOINT',
+  );
+  const metricsEndpoint = signalEndpoint(
+    optionalHttpEndpoint(
+      environment.OTEL_EXPORTER_OTLP_METRICS_ENDPOINT,
+      'OTEL_EXPORTER_OTLP_METRICS_ENDPOINT',
+    ),
+    baseEndpoint,
+    'v1/metrics',
+  );
+  const logsEndpoint = signalEndpoint(
+    optionalHttpEndpoint(
+      environment.OTEL_EXPORTER_OTLP_LOGS_ENDPOINT,
+      'OTEL_EXPORTER_OTLP_LOGS_ENDPOINT',
+    ),
+    baseEndpoint,
+    'v1/logs',
   );
   const exportIntervalMillis = positiveInteger(
     environment.OTEL_METRIC_EXPORT_INTERVAL,
@@ -56,41 +87,69 @@ export function initializeTelemetry(
     );
   }
 
+  const resource = telemetryResource(environment);
   const reader = new PeriodicExportingMetricReader({
-    exporter: new OTLPMetricExporter(endpoint ? { url: endpoint } : {}),
+    exporter: new OTLPMetricExporter(
+      metricsEndpoint ? { url: metricsEndpoint } : {},
+    ),
     exportIntervalMillis,
     exportTimeoutMillis,
   });
-  provider = new MeterProvider({
-    resource: resourceFromAttributes({
-      'service.name': METER_NAME,
-      'service.version': packageJson.version,
-      'service.instance.id': safeInstanceId(environment.HOSTNAME),
-      'deployment.environment.name': safeEnvironment(
-        environment.OTEL_DEPLOYMENT_ENVIRONMENT,
-      ),
-    }),
+  meterProvider = new MeterProvider({
+    resource,
     readers: [reader],
   });
-  meter = provider.getMeter(METER_NAME, packageJson.version);
+  meter = meterProvider.getMeter(METER_NAME, packageJson.version);
+
+  if (logsEndpoint) {
+    loggerProvider = new LoggerProvider({
+      resource,
+      processors: [
+        new BatchLogRecordProcessor({
+          exporter: new OTLPLogExporter({ url: logsEndpoint }),
+        }),
+      ],
+    });
+    telemetryLogger = loggerProvider.getLogger(METER_NAME, packageJson.version);
+  }
 }
 
 export async function shutdownTelemetry() {
-  const current = provider;
-  provider = null;
+  const currentMeterProvider = meterProvider;
+  const currentLoggerProvider = loggerProvider;
+  meterProvider = null;
+  loggerProvider = null;
+  telemetryLogger = null;
   meter = metrics.getMeter(METER_NAME, packageJson.version);
-  if (!current) {
+  if (!currentMeterProvider && !currentLoggerProvider) {
     return;
   }
 
-  const shutdown = current.shutdown();
+  const shutdown = Promise.all([
+    currentLoggerProvider?.shutdown(),
+    currentMeterProvider?.shutdown(),
+  ]).then(() => undefined);
   const timeout = new Promise<void>((resolve) => {
     setTimeout(resolve, SHUTDOWN_TIMEOUT_MS).unref();
   });
   await Promise.race([shutdown, timeout]);
 }
 
-function optionalMetricsEndpoint(value: string | undefined) {
+export function emitTelemetryLog(
+  level: 'debug' | 'info' | 'warn' | 'error',
+  event: string,
+  attributes: Record<string, boolean | number | string>,
+) {
+  telemetryLogger?.emit({
+    eventName: event,
+    severityNumber: severityNumber(level),
+    severityText: level.toUpperCase(),
+    body: event,
+    attributes,
+  });
+}
+
+function optionalHttpEndpoint(value: string | undefined, name: string) {
   const raw = value?.trim();
   if (!raw) {
     return undefined;
@@ -99,14 +158,88 @@ function optionalMetricsEndpoint(value: string | undefined) {
   try {
     endpoint = new URL(raw);
   } catch {
-    throw new Error('OTEL_EXPORTER_OTLP_METRICS_ENDPOINT must be a valid URL');
+    throw new Error(`${name} must be a valid URL`);
   }
   if (endpoint.protocol !== 'http:' && endpoint.protocol !== 'https:') {
-    throw new Error(
-      'OTEL_EXPORTER_OTLP_METRICS_ENDPOINT must be an http(s) URL',
-    );
+    throw new Error(`${name} must be an http(s) URL`);
   }
   return raw;
+}
+
+function signalEndpoint(
+  signalEndpoint: string | undefined,
+  baseEndpoint: string | undefined,
+  signalPath: string,
+) {
+  if (signalEndpoint || !baseEndpoint) {
+    return signalEndpoint;
+  }
+  return new URL(signalPath, `${baseEndpoint.replace(/\/$/, '')}/`).toString();
+}
+
+function telemetryResource(environment: NodeJS.ProcessEnv): Resource {
+  const configured = parseResourceAttributes(
+    environment.OTEL_RESOURCE_ATTRIBUTES,
+  );
+  return resourceFromAttributes({
+    ...configured,
+    'service.name': METER_NAME,
+    'service.version': packageJson.version,
+    'service.instance.id': safeInstanceId(
+      environment.HOSTNAME ?? configured['service.instance.id'],
+    ),
+    'deployment.environment.name': safeEnvironment(
+      environment.OTEL_DEPLOYMENT_ENVIRONMENT ??
+        configured['deployment.environment.name'],
+    ),
+  });
+}
+
+function parseResourceAttributes(value: string | undefined) {
+  const raw = value?.trim();
+  if (!raw) {
+    return {};
+  }
+
+  const attributes: Record<string, string> = {};
+  for (const entry of raw.split(',')) {
+    const separator = entry.indexOf('=');
+    if (
+      separator < 1 ||
+      separator === entry.length - 1 ||
+      entry.indexOf('=', separator + 1) !== -1
+    ) {
+      throw new Error(
+        'OTEL_RESOURCE_ATTRIBUTES must contain comma-separated key=value pairs',
+      );
+    }
+    let key: string;
+    let attributeValue: string;
+    try {
+      key = decodeURIComponent(entry.slice(0, separator).trim());
+      attributeValue = decodeURIComponent(entry.slice(separator + 1).trim());
+    } catch {
+      throw new Error(
+        'OTEL_RESOURCE_ATTRIBUTES contains invalid percent-encoding',
+      );
+    }
+    if (!key || !attributeValue) {
+      throw new Error(
+        'OTEL_RESOURCE_ATTRIBUTES keys and values must not be empty',
+      );
+    }
+    attributes[key] = attributeValue;
+  }
+  return attributes;
+}
+
+function severityNumber(level: 'debug' | 'info' | 'warn' | 'error') {
+  return {
+    debug: SeverityNumber.DEBUG,
+    info: SeverityNumber.INFO,
+    warn: SeverityNumber.WARN,
+    error: SeverityNumber.ERROR,
+  }[level];
 }
 
 function positiveInteger(
@@ -125,15 +258,15 @@ function positiveInteger(
   return parsed;
 }
 
-function safeInstanceId(value: string | undefined) {
-  const normalized = value?.trim();
+function safeInstanceId(value: unknown) {
+  const normalized = typeof value === 'string' ? value.trim() : undefined;
   return normalized && /^[a-zA-Z0-9._-]{1,128}$/.test(normalized)
     ? normalized
     : 'unknown';
 }
 
-function safeEnvironment(value: string | undefined) {
-  const normalized = value?.trim();
+function safeEnvironment(value: unknown) {
+  const normalized = typeof value === 'string' ? value.trim() : undefined;
   return normalized && /^[a-zA-Z0-9._-]{1,64}$/.test(normalized)
     ? normalized
     : 'unspecified';

@@ -2,25 +2,12 @@ services:
   app:
     environment:
       TELEMETRY_ENABLED: "true"
-      OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: http://alloy:4318/v1/metrics
+      OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: http://prometheus:9090/api/v1/otlp/v1/metrics
+      OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: http://loki:3100/otlp/v1/logs
       OTEL_DEPLOYMENT_ENVIRONMENT: local
+      OTEL_RESOURCE_ATTRIBUTES: ${OTEL_RESOURCE_ATTRIBUTES:-service.group=resend-conversation-service,vcs.revision=local}
       OTEL_METRIC_EXPORT_INTERVAL: "1000"
       OTEL_EXPORTER_OTLP_METRICS_TIMEOUT: "500"
-    labels:
-      observability.logs: "true"
-    depends_on:
-      alloy:
-        condition: service_started
-
-  alloy:
-    image: grafana/alloy:v1.19.0
-    command: run /etc/alloy/config.alloy --server.http.listen-addr=0.0.0.0:12345
-    ports:
-      - "12345:12345"
-    volumes:
-      - ./infra/observability/alloy/config.alloy:/etc/alloy/config.alloy:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - alloy_data:/var/lib/alloy/data
     depends_on:
       - loki
       - prometheus
@@ -31,7 +18,7 @@ services:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
       - --web.enable-lifecycle
-      - --web.enable-remote-write-receiver
+      - --web.enable-otlp-receiver
     ports:
       - "9090:9090"
     volumes:
@@ -64,7 +51,6 @@ services:
       - prometheus
 
 volumes:
-  alloy_data:
   prometheus_data:
   loki_data:
   grafana_data:

@@ -8,6 +8,22 @@ and this project uses [Semantic Versioning](https://semver.org/). See
 
 ## [Unreleased]
 
+## [0.7.0-rc.7] - 2026-09-02
+
+### Added
+
+- Added direct OTLP/HTTP application log export to Loki and shared
+  `OTEL_RESOURCE_ATTRIBUTES` deployment tags for metrics and logs.
+
+### Changed
+
+- Replaced the optional Alloy forwarding layer with native Prometheus OTLP
+  metric ingestion and native Loki OTLP log ingestion in the local
+  observability stack.
+- Added curated environment, service group, version, and revision filters to
+  the Grafana dashboard and documented direct OTLP operations for local Docker
+  and Railway deployments.
+
 ## [0.7.0-rc.6] - 2026-09-02
 
 ### Changed

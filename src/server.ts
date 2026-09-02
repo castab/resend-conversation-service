@@ -339,9 +339,9 @@ async function startServer() {
       server.close(async () => {
         await stopOutboxDrainScheduler();
         await stopConversationEventRuntime();
-        await shutdownTelemetry();
         await client.$disconnect();
         logEvent('info', 'application_shutdown_completed');
+        await shutdownTelemetry();
         process.exit(0);
       });
       setTimeout(() => process.exit(1), 10_000).unref();

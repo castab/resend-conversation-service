@@ -9,7 +9,7 @@
       "id": 1,
       "targets": [
         {
-          "expr": "sum(rate(http_server_request_count_total[5m]))",
+          "expr": "sum(rate(http_server_request_count_total{service_name=~\"$service_name\",deployment_environment_name=~\"$environment\",service_group=~\"$service_group\",vcs_revision=~\"$revision\"}[5m]))",
           "refId": "A"
         }
       ],
@@ -23,7 +23,7 @@
       "id": 2,
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(http_server_request_duration_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_request_duration_seconds_bucket{service_name=~\"$service_name\",deployment_environment_name=~\"$environment\",service_group=~\"$service_group\",vcs_revision=~\"$revision\"}[5m])) by (le))",
           "refId": "A"
         }
       ],
@@ -36,7 +36,10 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
       "id": 3,
       "targets": [
-        { "expr": "resend_conversation_outbox_pending", "refId": "A" }
+        {
+          "expr": "resend_conversation_outbox_pending{service_name=~\"$service_name\",deployment_environment_name=~\"$environment\",service_group=~\"$service_group\",vcs_revision=~\"$revision\"}",
+          "refId": "A"
+        }
       ],
       "title": "Pending outbox messages",
       "type": "timeseries"
@@ -48,7 +51,7 @@
       "id": 4,
       "targets": [
         {
-          "expr": "resend_conversation_outbox_oldest_pending_age",
+          "expr": "resend_conversation_outbox_oldest_pending_age_seconds{service_name=~\"$service_name\",deployment_environment_name=~\"$environment\",service_group=~\"$service_group\",vcs_revision=~\"$revision\"}",
           "refId": "A"
         }
       ],
@@ -59,13 +62,86 @@
       "datasource": { "type": "loki", "uid": "loki" },
       "gridPos": { "h": 10, "w": 24, "x": 0, "y": 16 },
       "id": 5,
-      "targets": [{ "expr": "{service_name=\"app\"}", "refId": "A" }],
+      "targets": [
+        {
+          "expr": "{service_name=~\"$service_name\", deployment_environment_name=~\"$environment\", service_group=~\"$service_group\", vcs_revision=~\"$revision\"}",
+          "refId": "A"
+        }
+      ],
       "title": "Application logs",
       "type": "logs"
     }
   ],
   "schemaVersion": 41,
   "tags": ["resend", "otel", "loki", "prometheus"],
+  "templating": {
+    "list": [
+      {
+        "allValue": ".*",
+        "current": {},
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "definition": "label_values(resend_conversation_runtime_info, service_name)",
+        "includeAll": true,
+        "label": "Service",
+        "multi": true,
+        "name": "service_name",
+        "query": {
+          "query": "label_values(resend_conversation_runtime_info, service_name)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 1,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": {},
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "definition": "label_values(resend_conversation_runtime_info{service_name=~\"$service_name\"}, deployment_environment_name)",
+        "includeAll": true,
+        "label": "Environment",
+        "multi": true,
+        "name": "environment",
+        "query": {
+          "query": "label_values(resend_conversation_runtime_info{service_name=~\"$service_name\"}, deployment_environment_name)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 1,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": {},
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "definition": "label_values(resend_conversation_runtime_info{service_name=~\"$service_name\",deployment_environment_name=~\"$environment\"}, service_group)",
+        "includeAll": true,
+        "label": "Service group",
+        "multi": true,
+        "name": "service_group",
+        "query": {
+          "query": "label_values(resend_conversation_runtime_info{service_name=~\"$service_name\",deployment_environment_name=~\"$environment\"}, service_group)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 1,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": {},
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "definition": "label_values(resend_conversation_runtime_info{service_name=~\"$service_name\",deployment_environment_name=~\"$environment\",service_group=~\"$service_group\"}, vcs_revision)",
+        "includeAll": true,
+        "label": "Revision",
+        "multi": true,
+        "name": "revision",
+        "query": {
+          "query": "label_values(resend_conversation_runtime_info{service_name=~\"$service_name\",deployment_environment_name=~\"$environment\",service_group=~\"$service_group\"}, vcs_revision)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 1,
+        "type": "query"
+      }
+    ]
+  },
   "time": { "from": "now-6h", "to": "now" },
   "title": "Resend Conversation Service",
   "uid": "resend-conversation-service",

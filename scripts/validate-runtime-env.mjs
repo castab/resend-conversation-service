@@ -119,15 +119,45 @@ if (drainScheduleEnabled) {
 }
 
 if ((process.env.TELEMETRY_ENABLED ?? '').trim().toLowerCase() === 'true') {
-  const endpoint = process.env.OTEL_EXPORTER_OTLP_METRICS_ENDPOINT?.trim();
-  if (endpoint) {
+  for (const name of [
+    'OTEL_EXPORTER_OTLP_ENDPOINT',
+    'OTEL_EXPORTER_OTLP_METRICS_ENDPOINT',
+    'OTEL_EXPORTER_OTLP_LOGS_ENDPOINT',
+  ]) {
+    const endpoint = process.env[name]?.trim();
+    if (!endpoint) {
+      continue;
+    }
     try {
       const parsed = new URL(endpoint);
       if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-        fail('runtime_telemetry_endpoint_invalid');
+        fail('runtime_telemetry_endpoint_invalid', { name });
       }
     } catch {
-      fail('runtime_telemetry_endpoint_invalid');
+      fail('runtime_telemetry_endpoint_invalid', { name });
+    }
+  }
+
+  const resourceAttributes = process.env.OTEL_RESOURCE_ATTRIBUTES?.trim();
+  if (resourceAttributes) {
+    for (const entry of resourceAttributes.split(',')) {
+      const separator = entry.indexOf('=');
+      if (
+        separator < 1 ||
+        separator === entry.length - 1 ||
+        entry.indexOf('=', separator + 1) !== -1
+      ) {
+        fail('runtime_telemetry_resource_attributes_invalid');
+      }
+      try {
+        const key = decodeURIComponent(entry.slice(0, separator).trim());
+        const value = decodeURIComponent(entry.slice(separator + 1).trim());
+        if (!key || !value) {
+          fail('runtime_telemetry_resource_attributes_invalid');
+        }
+      } catch {
+        fail('runtime_telemetry_resource_attributes_invalid');
+      }
     }
   }
 }

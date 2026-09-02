@@ -5,9 +5,16 @@ global:
 rule_files:
   - /etc/prometheus/rules.yml
 
-scrape_configs:
-  # Prometheus knows only the shared Alloy agent; application metrics arrive
-  # through Alloy remote write rather than per-application scrape jobs.
-  - job_name: alloy
-    static_configs:
-      - targets: [alloy:12345]
+storage:
+  tsdb:
+    out_of_order_time_window: 30m
+
+otlp:
+  promote_resource_attributes:
+    - service.name
+    - service.version
+    - deployment.environment.name
+    - service.group
+    - vcs.revision
+
+scrape_configs: []
