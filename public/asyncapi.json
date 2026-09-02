@@ -3,7 +3,7 @@
   "id": "urn:resend-conversation-service:conversation-events",
   "info": {
     "title": "resend-conversation-service Conversation Events API",
-    "version": "0.7.0-rc.5",
+    "version": "0.7.0-rc.6",
     "description": "Versioned, non-sensitive conversation lifecycle events published to NATS JetStream. Transport-specific metadata is described on the channel."
   },
   "defaultContentType": "application/json",

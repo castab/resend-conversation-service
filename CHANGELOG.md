@@ -8,6 +8,14 @@ and this project uses [Semantic Versioning](https://semver.org/). See
 
 ## [Unreleased]
 
+## [0.7.0-rc.6] - 2026-09-02
+
+### Changed
+
+- Made the OpenTelemetry metrics endpoint optional when telemetry is enabled and
+  allowed operators to supply any HTTP(S) collector URL without requiring the
+  `/v1/metrics` path.
+
 ## [0.7.0-rc.5] - 2026-09-01
 
 ### Added
