@@ -51,7 +51,7 @@
       "get": {
         "operationId": "getHealthV2",
         "summary": "Check service readiness",
-        "description": "Checks configuration for every webhook, conversation, and outbox capability plus PostgreSQL connectivity without returning sensitive details.",
+        "description": "Checks configuration for every webhook, conversation, and outbox capability, PostgreSQL connectivity, and the health of any configured conversation event sink without returning sensitive details. When the NATS sink is enabled, startup verifies the configured JetStream stream and subject; the service does not provision them.",
         "tags": ["Operations"],
         "security": [],
         "responses": {
@@ -72,7 +72,7 @@
             "$ref": "#/components/responses/BadRequest"
           },
           "503": {
-            "description": "Required configuration or PostgreSQL is unavailable.",
+            "description": "Required configuration, PostgreSQL, or an enabled conversation event sink is unavailable.",
             "content": {
               "application/json": {
                 "schema": {

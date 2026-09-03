@@ -126,7 +126,11 @@ Published messages include `x-conversation-event-id` and
 event ID. Delivery is at least once: reject unsupported schema versions,
 deduplicate by event ID, order within each conversation by sequence, tolerate a
 non-1 starting sequence or gaps, and fetch full data through an authorized HTTP
-conversation read. Enabling the sink does not backfill earlier events.
+conversation read. Enabling the sink does not backfill earlier events. When
+enabled, startup requires and verifies the configured JetStream stream and
+subject; the service does not provision or mutate the stream. Persistent
+publication failure makes the event runtime unhealthy and readiness returns
+`503` until a clean drain cycle succeeds.
 
 ## Critical invariants
 
@@ -194,7 +198,7 @@ Conversations created before the V1 retirement are still stored with `apiVersion
 - Topic lookup is more lenient than create/assignment for `externalTopicId` length. Keep it at 255 characters or fewer.
 - Some uncaught infrastructure failures may not return the standard JSON error envelope.
 - No formal client timeout, request correlation ID, or gateway exposure contract is published.
-- Health readiness requires `DATABASE_URL`, `RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET`, a valid `RESEND_REPLY_TO`, an EMAIL V2 credential, `OUTBOX_DRAIN_API_KEY`, and PostgreSQL connectivity.
+- Health readiness requires `DATABASE_URL`, `RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET`, a valid `RESEND_REPLY_TO`, an EMAIL V2 credential, `OUTBOX_DRAIN_API_KEY`, and PostgreSQL connectivity. With `CONVERSATION_EVENTS_SINKS=NATS`, the configured NATS stream and subject must also be valid.
 - Runtime accepts trimmed, case-insensitive manual state values; use lowercase OpenAPI enum values.
 - Runtime webhook family acceptance is broader than the documented event enums; send only documented Resend event types.
 - Runtime and OpenAPI currently reset `stateChangedAt` after every successful manual state write, including a repeated value. This conflicts with the service lifecycle invariant that the timestamp should change only with the state value; avoid no-op state writes and do not depend on the reset.
