@@ -457,7 +457,11 @@ The machine-readable contract is the AsyncAPI 3.1 document at
 names, and final subject or topic names are deployment-owned. Values shown as
 AsyncAPI server, subject, or topic defaults are substitution examples only;
 the service has no runtime fallback when an enabled sink omits its required
-configuration.
+configuration. When NATS is enabled, startup verifies that the configured
+JetStream stream exists and captures the configured subject; the service does
+not provision or mutate the stream. Persistent publication failure makes the
+event runtime unhealthy and therefore makes readiness return `503` until a
+clean drain cycle succeeds.
 
 Every event has these required payload fields:
 
@@ -537,8 +541,12 @@ Consumers need the deployed base URL and the credential for their route family. 
 - `OUTBOX_DRAIN_API_KEY` for the shared drain
 
 Event consumers additionally need deployment-provided NATS connection
-details and subscriber credentials. Those credentials are independent of the
-HTTP bearer credentials and are not defined by this service contract.
+details and subscriber credentials. The service operator enables the sink with
+`CONVERSATION_EVENTS_SINKS=NATS` and supplies
+`CONVERSATION_EVENTS_NATS_SERVERS`, `CONVERSATION_EVENTS_NATS_STREAM`, and
+`CONVERSATION_EVENTS_NATS_SUBJECT`; token, username/password, and TLS settings
+are optional deployment configuration. Those credentials are independent of
+the HTTP bearer credentials and are not defined by this service contract.
 
 V2 additionally requires database allowlist rows for each approved canonical address and role. Keep allowlist changes in controlled database administration; no application management API exists.
 
@@ -591,7 +599,7 @@ curl -i \
 - Gateway exposure policy is deployment-owned and not included in this contract.
 - Topic lookup does not enforce the documented 255-character `externalTopicId` limit although create and assignment do; consumers must follow the stricter contract.
 - Runtime webhook family validation accepts signed `email.*`, `contact.*`, and `domain.*` types when their payload can be projected, while the OpenAPI event enums remain the strict supported contract. Consumers should send only documented Resend event types.
-- Health readiness requires `DATABASE_URL`, `RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET`, a valid `RESEND_REPLY_TO` base, an EMAIL V2 credential, `OUTBOX_DRAIN_API_KEY`, and PostgreSQL connectivity.
+- Health readiness requires `DATABASE_URL`, `RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET`, a valid `RESEND_REPLY_TO` base, an EMAIL V2 credential, `OUTBOX_DRAIN_API_KEY`, and PostgreSQL connectivity. When `CONVERSATION_EVENTS_SINKS=NATS`, the configured NATS stream and subject must also be valid and a persistent publication failure makes readiness return `503` until recovery.
 - Runtime accepts trimmed, case-insensitive state values for the manual state route; use the lowercase OpenAPI enum values as the supported contract.
 - Current runtime and OpenAPI reset `stateChangedAt` after every successful manual state write, including a repeated value. This conflicts with the service lifecycle invariant that the timestamp should change only with the state value; avoid no-op state writes and do not depend on the reset while the discrepancy remains unresolved.
 - Conversation send validators may ignore an explicitly empty `text` or `html` when the other body format is nonempty. The strict contract requires every supplied body field to be nonempty.

@@ -24,7 +24,7 @@
     "natsConversationEvents": {
       "address": "{subject}",
       "title": "NATS conversation events",
-      "description": "The configured NATS JetStream subject. JetStream also sets the protocol-defined Nats-Msg-Id to the payload event id for publish deduplication.",
+      "description": "The configured NATS JetStream subject. When the NATS sink is enabled, CONVERSATION_EVENTS_NATS_STREAM and CONVERSATION_EVENTS_NATS_SUBJECT are required; startup verifies that the stream exists and captures the subject, and the service never creates or mutates the stream. JetStream also sets the protocol-defined Nats-Msg-Id to the payload event id for publish deduplication.",
       "servers": [
         {
           "$ref": "#/servers/nats"
@@ -69,7 +69,7 @@
       "action": "send",
       "title": "Publish conversation events to NATS",
       "summary": "Publishes committed conversation lifecycle events to the configured JetStream subject.",
-      "description": "Delivery is at least once and persisted through a durable per-sink delivery record. Failed publication is retried without a terminal attempt limit and blocks later sequence values for the same conversation. Deduplicate by payload id, process each conversation by sequence, and do not assume sequence 1 will be available. Enabling this sink does not backfill events committed before it became active.",
+      "description": "Delivery is at least once and persisted through a durable per-sink delivery record. Failed publication is retried without a terminal attempt limit, marks the event runtime unhealthy until a clean drain cycle, and blocks later sequence values for the same conversation. Deduplicate by payload id, process each conversation by sequence, and do not assume sequence 1 will be available. Enabling this sink does not backfill events committed before it became active.",
       "channel": {
         "$ref": "#/channels/natsConversationEvents"
       },
