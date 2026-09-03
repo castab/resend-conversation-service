@@ -131,6 +131,7 @@ When a `V1`-tagged conversation is promoted, its existing persisted Reply-To bas
 | `POST` | `/api/conversations/v2/outbox` | Persist and enqueue an opening message | `202`, replay `200`/`202` | `400`, `401`, `409`, `413`, `415`, `500`, `502` |
 | `GET` | `/api/conversations/v2/{conversationId}` | Read a conversation by service ID | `200` | `400`, `401`, `404`, `500` |
 | `PATCH` | `/api/conversations/v2/{conversationId}` | Assign an unassigned null-version or V2 conversation and mark it V2 | `200` | `400`, `401`, `404`, `409`, `413`, `415`, `500` |
+| `DELETE` | `/api/conversations/v2/{conversationId}` | Permanently delete a conversation and its messages | `204` | `400`, `401`, `404`, `500` |
 | `POST` | `/api/conversations/v2/{conversationId}/state` | Set the conversation state by hand | `200` | `400`, `401`, `404`, `413`, `415`, `500` |
 | `POST` | `/api/conversations/v2/{conversationId}/messages` | Synchronously send a reply | `201`, replay `200`/`202` | `400`, `401`, `404`, `409`, `413`, `415`, `500`, `502`, `503` |
 | `POST` | `/api/conversations/v2/{conversationId}/messages/outbox` | Persist and enqueue a reply | `202`, replay `200`/`202` | `400`, `401`, `404`, `409`, `413`, `415`, `500`, `502`, `503` |
@@ -301,6 +302,10 @@ Reads are not filtered by conversation API version. Reading a `V1`-tagged conver
 
 List unassigned inbound conversations with `GET /api/conversations/v2?assignment=unassigned`. Assign one with `PATCH /api/conversations/v2/{conversationId}` and body `{"topic":{...}}`. V2 assignment succeeds only while the conversation is unassigned and its API version is null or already V2; a successfully persisted assignment marks or preserves it as V2.
 
+### Delete a conversation
+
+`DELETE /api/conversations/v2/{conversationId}` permanently removes the conversation, its messages, outbox entries, and routing aliases; there is no soft-delete or recovery. It returns `204` with no body, and `404` for an unknown or already-deleted ID, so retrying a delete is safe. When a NATS sink is configured, the service records a final `conversation.deleted` event before removing the conversation and purges the conversation's earlier event history, so `conversation.deleted` is the last event a subscriber will see for that conversation.
+
 ### Track and clear replies
 
 Every conversation read includes `state`, `stateChangedAt`, and a derived `awaitingReply` boolean that is true exactly when `state` is `awaiting_us`.
@@ -460,7 +465,7 @@ Every event has these required payload fields:
 | --- | --- |
 | `schemaVersion` | Integer payload contract version; currently exactly `1` |
 | `id` | UUIDv7 event ID and consumer deduplication key |
-| `type` | Discriminator for one of the seven event schemas |
+| `type` | Discriminator for one of the eight event schemas |
 | `occurredAt` | Time the represented state change or intent occurred, not publication time |
 | `conversationId` | UUIDv7 conversation ID used for reads and ordering |
 | `sequence` | Monotonic integer within one conversation |
@@ -479,6 +484,7 @@ Event-specific fields and causes are:
 | `conversation.assigned` | Non-null `topic` | `operator` / `topic_assignment` |
 | `conversation.message.delivery.updated` | `messageId`, `deliveryState` | `system` / `resend_delivery_webhook` |
 | `conversation.merged` | Source events include `mergedIntoConversationId`; the survivor event omits it | `system` / `thread_reconciliation` |
+| `conversation.deleted` | None | `operator` / `manual_delete` |
 
 `state.from` may be null and state values are `awaiting_us`,
 `awaiting_participant`, `concluded`, or `terminated`. `deliveryState` is one of

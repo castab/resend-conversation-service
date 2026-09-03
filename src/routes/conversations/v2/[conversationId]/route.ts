@@ -118,6 +118,58 @@ export async function PATCH(
   }
 }
 
+export async function DELETE(
+  request: Request,
+  context: { params: Promise<{ conversationId: string }> },
+) {
+  const unauthorized = authorizeEmailV2(request);
+  if (unauthorized) {
+    return unauthorized;
+  }
+  const { conversationId: rawConversationId } = await context.params;
+  if (!isUuid(rawConversationId)) {
+    return Response.json({ error: 'Invalid conversation ID' }, { status: 400 });
+  }
+  const conversationId = rawConversationId.toLowerCase();
+  const client = getPrismaClient();
+
+  const deleted = await client.$transaction(async (transaction) => {
+    await transaction.$queryRaw`
+      SELECT pg_advisory_xact_lock(hashtext(${conversationId}))::text
+    `;
+    const current = await transaction.emailConversation.findUnique({
+      where: { id: conversationId },
+      select: { id: true },
+    });
+    if (!current) {
+      return false;
+    }
+
+    const event = await appendConversationEvent(transaction, {
+      conversationId,
+      type: 'DELETED',
+      occurredAt: new Date(),
+      actor: 'operator',
+      cause: 'manual_delete',
+    });
+    await transaction.conversationEvent.deleteMany({
+      where: {
+        conversationId,
+        ...(event ? { id: { not: event.id } } : {}),
+      },
+    });
+    await transaction.emailConversation.delete({
+      where: { id: conversationId },
+    });
+    return true;
+  });
+
+  if (!deleted) {
+    return Response.json({ error: 'Conversation not found' }, { status: 404 });
+  }
+  return new Response(null, { status: 204 });
+}
+
 function validateTopic(
   value: unknown,
 ):

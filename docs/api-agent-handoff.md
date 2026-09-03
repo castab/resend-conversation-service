@@ -78,7 +78,7 @@ The complete application-operation layout:
 | `POST`, `GET` | `/api/conversations/v2` | Create/send; list unassigned with `assignment=unassigned` |
 | `GET` | `/api/conversations/v2/summary` | Counts per conversation state plus a filterable page of conversation metadata |
 | `POST` | `/api/conversations/v2/outbox` | Enqueue opening message; pending idempotent replay also returns `202` |
-| `GET`, `PATCH` | `/api/conversations/v2/{conversationId}` | Read; assign an unassigned null-version or already-V2 conversation |
+| `GET`, `PATCH`, `DELETE` | `/api/conversations/v2/{conversationId}` | Read; assign an unassigned null-version or already-V2 conversation; permanently delete the conversation and its messages |
 | `POST` | `/api/conversations/v2/{conversationId}/state` | Set conversation state by hand; no `Idempotency-Key` |
 | `POST` | `/api/conversations/v2/{conversationId}/messages` | Send reply |
 | `POST` | `/api/conversations/v2/{conversationId}/messages/outbox` | Enqueue reply; pending idempotent replay also returns `202` |
@@ -94,7 +94,7 @@ resources and are not application operations in OpenAPI.
 
 The optional event feed publishes the same closed `schemaVersion: 1` JSON
 payload to a configured NATS JetStream subject. It emits
-seven types:
+eight types:
 
 - `conversation.created`
 - `conversation.message.received`
@@ -103,6 +103,7 @@ seven types:
 - `conversation.assigned`
 - `conversation.message.delivery.updated`
 - `conversation.merged`
+- `conversation.deleted`
 
 Every event includes `id`, `occurredAt`, `conversationId`, per-conversation
 `sequence`, nullable `topic`, `actor`, and `cause`. Message events include
@@ -110,6 +111,15 @@ Every event includes `id`, `occurredAt`, `conversationId`, per-conversation
 `deliveryState`; source merge events include `mergedIntoConversationId`, while
 the survivor merge event omits it. Direct email emits no conversation events,
 and event payloads contain no email addresses, content, or raw provider data.
+
+`DELETE /api/conversations/v2/{conversationId}` permanently removes the
+conversation, its messages, outbox entries, and routing aliases; there is no
+soft-delete. When a sink is configured, the service records a final
+`conversation.deleted` event before removing the conversation and purges the
+conversation's earlier event history, so `conversation.deleted` is the last
+event a subscriber will see for that conversation. The route returns `204` for
+a successful delete and `404` for an unknown or already-deleted ID, so
+retrying a delete is safe.
 
 Published messages include `x-conversation-event-id` and
 `x-conversation-event-schema-version`. NATS sets JetStream `Nats-Msg-Id` to the
@@ -138,6 +148,7 @@ conversation read. Enabling the sink does not backfill earlier events.
 16. Automatic transitions move `stateChangedAt` only when the state value changes, so `awaiting_us` records when the wait began. Every successful manual state write currently resets it, including a repeated value.
 17. Automatic transitions never move `terminated`; inbound mail reopens `concluded`. Merges take `terminated` > `awaiting_us` > `awaiting_participant` > `concluded` with the earliest timestamp of the winning state.
 18. State transitions are driven by mail flow rather than by the route that triggered them, so they apply equally to conversations created before the V1 retirement. The state route permits every transition and repeating one succeeds.
+19. Conversation deletion is permanent and cascades to messages, outbox entries, and routing aliases; there is no soft-delete or recovery. Deletion also purges the conversation's earlier event history, so a subscriber's last observed event for a deleted conversation is `conversation.deleted`.
 
 ## Promotion
 

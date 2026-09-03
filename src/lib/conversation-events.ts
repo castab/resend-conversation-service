@@ -16,7 +16,8 @@ export type ConversationEventKind =
   | 'STATE_CHANGED'
   | 'ASSIGNED'
   | 'MESSAGE_DELIVERY_UPDATED'
-  | 'MERGED';
+  | 'MERGED'
+  | 'DELETED';
 
 type EventClient = PrismaClient | Prisma.TransactionClient;
 

@@ -57,6 +57,9 @@
         },
         "conversationMerged": {
           "$ref": "#/components/messages/conversationMerged"
+        },
+        "conversationDeleted": {
+          "$ref": "#/components/messages/conversationDeleted"
         }
       }
     }
@@ -91,6 +94,9 @@
         },
         {
           "$ref": "#/channels/natsConversationEvents/messages/conversationMerged"
+        },
+        {
+          "$ref": "#/channels/natsConversationEvents/messages/conversationDeleted"
         }
       ],
       "bindings": {
@@ -378,6 +384,40 @@
               },
               "actor": "system",
               "cause": "thread_reconciliation"
+            }
+          }
+        ]
+      },
+      "conversationDeleted": {
+        "name": "conversation.deleted",
+        "title": "Conversation deleted",
+        "summary": "A conversation and its messages were permanently deleted.",
+        "description": "Recorded before the conversation row is removed. Prior conversation events are purged when the conversation is deleted, so this is the last event a subscriber will see for the conversation.",
+        "payload": {
+          "$ref": "#/components/schemas/ConversationDeletedEvent"
+        },
+        "traits": [
+          {
+            "$ref": "#/components/messageTraits/conversationEvent"
+          }
+        ],
+        "examples": [
+          {
+            "name": "conversationDeleted",
+            "headers": {
+              "x-conversation-event-id": "01a0216b-ad60-7000-8000-000000000003",
+              "x-conversation-event-schema-version": "1"
+            },
+            "payload": {
+              "schemaVersion": 1,
+              "id": "01a0216b-ad60-7000-8000-000000000003",
+              "type": "conversation.deleted",
+              "occurredAt": "2026-09-02T23:05:00.000Z",
+              "conversationId": "01a0192e-efb8-7725-abda-3bec284104ed",
+              "sequence": 4,
+              "topic": null,
+              "actor": "operator",
+              "cause": "manual_delete"
             }
           }
         ]
@@ -953,6 +993,56 @@
             }
           }
         ]
+      },
+      "ConversationDeletedEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schemaVersion",
+          "id",
+          "type",
+          "occurredAt",
+          "conversationId",
+          "sequence",
+          "topic",
+          "actor",
+          "cause"
+        ],
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "const": 1
+          },
+          "id": {
+            "$ref": "#/components/schemas/EventId"
+          },
+          "type": {
+            "type": "string",
+            "const": "conversation.deleted"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "conversationId": {
+            "$ref": "#/components/schemas/ConversationId"
+          },
+          "sequence": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "topic": {
+            "$ref": "#/components/schemas/NullableTopic"
+          },
+          "actor": {
+            "type": "string",
+            "const": "operator"
+          },
+          "cause": {
+            "type": "string",
+            "const": "manual_delete"
+          }
+        }
       }
     }
   }
