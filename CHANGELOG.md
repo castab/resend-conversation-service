@@ -8,6 +8,8 @@ and this project uses [Semantic Versioning](https://semver.org/). See
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-09-02
+
 ### Added
 
 - Added `DELETE /api/conversations/v2/{conversationId}` to permanently delete a
