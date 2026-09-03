@@ -990,6 +990,34 @@
             "$ref": "#/components/responses/ServerError"
           }
         }
+      },
+      "delete": {
+        "operationId": "deleteConversationV2",
+        "summary": "Delete a conversation and its messages",
+        "description": "Permanently deletes a conversation, its messages, outbox entries, and routing aliases. Records a DELETED conversation event before removing the conversation, then purges the conversation's prior event history.",
+        "tags": ["Conversations"],
+        "security": [
+          {
+            "emailV2Auth": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Conversation deleted."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
+        }
       }
     },
     "/api/conversations/v2/{conversationId}/state": {

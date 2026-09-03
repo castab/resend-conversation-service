@@ -31,6 +31,7 @@ import {
 import { POST as enqueueMessageV2 } from '@/routes/conversations/v2/[conversationId]/messages/outbox/route';
 import { POST as sendMessageV2 } from '@/routes/conversations/v2/[conversationId]/messages/route';
 import {
+  DELETE as deleteConversationV2,
   GET as getConversationV2,
   PATCH as patchConversationV2,
 } from '@/routes/conversations/v2/[conversationId]/route';
@@ -244,7 +245,8 @@ export function createApp() {
   app
     .route('/api/conversations/v2/:conversationId')
     .get(requireEmailV2Auth, adapt(getConversationV2))
-    .patch(requireEmailV2Auth, rawBody, adapt(patchConversationV2));
+    .patch(requireEmailV2Auth, rawBody, adapt(patchConversationV2))
+    .delete(requireEmailV2Auth, adapt(deleteConversationV2));
 
   app.get('/openapi.json', (_request, response, next) => {
     response.sendFile(

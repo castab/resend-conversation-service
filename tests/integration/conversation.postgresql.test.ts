@@ -1131,6 +1131,128 @@ describe('Private conversation API', () => {
     expect([first.status, second.status].sort()).toEqual([200, 409]);
   });
 
+  it('deletes a conversation and cascades its messages', async () => {
+    const created = await createConversation('delete-cascade');
+    await sendInbound(created.body.message.replyTo, 'delete-cascade-inbound');
+    const conversationId = created.body.conversationId;
+
+    const response = await fetch(`${baseUrl}/${conversationId}`, {
+      method: 'DELETE',
+      headers: headers(),
+    });
+    expect(response.status).toBe(204);
+    expect(await response.text()).toBe('');
+
+    const missing = await fetch(`${baseUrl}/${conversationId}`, {
+      headers: headers(),
+    });
+    expect(missing.status).toBe(404);
+
+    const { rows: messageRows } = await database.query(
+      'SELECT id FROM email_messages WHERE conversation_id = $1',
+      [conversationId],
+    );
+    expect(messageRows).toHaveLength(0);
+  });
+
+  it('purges all prior conversation events on delete when no sink is configured', async () => {
+    const { rows } = await database.query<{ id: string }>(
+      `INSERT INTO email_conversations
+        (title, subject, participant_address, last_message_at, updated_at, event_sequence)
+       VALUES ('Delete events unsinked', 'Delete events unsinked', 'person@example.com', now(), now(), 1)
+       RETURNING id`,
+    );
+    const conversationId = rows[0].id;
+    await database.query(
+      `INSERT INTO conversation_events (conversation_id, sequence, type, occurred_at, payload)
+       VALUES ($1, 1, 'CREATED', now(), '{}'::jsonb)`,
+      [conversationId],
+    );
+
+    const response = await fetch(`${baseUrl}/${conversationId}`, {
+      method: 'DELETE',
+      headers: headers(),
+    });
+    expect(response.status).toBe(204);
+
+    const { rows: events } = await database.query<{ type: string }>(
+      'SELECT type FROM conversation_events WHERE conversation_id = $1',
+      [conversationId],
+    );
+    expect(events).toHaveLength(0);
+  });
+
+  // Invokes the route handler directly (bypassing the separately-running app
+  // process under test) so CONVERSATION_EVENTS_SINKS can be toggled for this
+  // one case, exercising the DELETED event's survival through the purge step.
+  it('keeps the DELETED event queryable through the purge when the NATS sink is enabled', async () => {
+    const previousSinks = process.env.CONVERSATION_EVENTS_SINKS;
+    process.env.CONVERSATION_EVENTS_SINKS = 'nats';
+    try {
+      const { rows } = await database.query<{ id: string }>(
+        `INSERT INTO email_conversations
+          (title, subject, participant_address, last_message_at, updated_at, event_sequence)
+         VALUES ('Delete events sinked', 'Delete events sinked', 'person@example.com', now(), now(), 1)
+         RETURNING id`,
+      );
+      const conversationId = rows[0].id;
+      await database.query(
+        `INSERT INTO conversation_events (conversation_id, sequence, type, occurred_at, payload)
+         VALUES ($1, 1, 'CREATED', now(), '{}'::jsonb)`,
+        [conversationId],
+      );
+
+      const { DELETE: deleteConversationRoute } = await import(
+        '@/routes/conversations/v2/[conversationId]/route'
+      );
+      const request = new Request(`${baseUrl}/${conversationId}`, {
+        method: 'DELETE',
+        headers: headers(),
+      });
+      const response = await deleteConversationRoute(request, {
+        params: Promise.resolve({ conversationId }),
+      });
+      expect(response.status).toBe(204);
+
+      const { rows: events } = await database.query<{ type: string }>(
+        'SELECT type FROM conversation_events WHERE conversation_id = $1',
+        [conversationId],
+      );
+      expect(events.map((event) => event.type)).toEqual(['DELETED']);
+
+      const { rows: deliveries } = await database.query<{ sink: string }>(
+        `SELECT delivery.sink
+         FROM conversation_event_deliveries delivery
+         JOIN conversation_events event ON event.id = delivery.event_id
+         WHERE event.conversation_id = $1`,
+        [conversationId],
+      );
+      expect(deliveries.map((delivery) => delivery.sink)).toEqual(['NATS']);
+    } finally {
+      if (previousSinks === undefined) {
+        delete process.env.CONVERSATION_EVENTS_SINKS;
+      } else {
+        process.env.CONVERSATION_EVENTS_SINKS = previousSinks;
+      }
+    }
+  });
+
+  it('returns 404 deleting a conversation that does not exist', async () => {
+    const response = await fetch(
+      `${baseUrl}/01a0192e-efb8-7725-abda-3bec284104ed`,
+      { method: 'DELETE', headers: headers() },
+    );
+    expect(response.status).toBe(404);
+  });
+
+  it('requires bearer authentication to delete a conversation', async () => {
+    const created = await createConversation('delete-auth');
+    const response = await fetch(`${baseUrl}/${created.body.conversationId}`, {
+      method: 'DELETE',
+    });
+    expect(response.status).toBe(401);
+  });
+
   it('opens a conversation awaiting the participant', async () => {
     const created = await createConversation('state-open');
     const response = await fetch(`${baseUrl}/${created.body.conversationId}`, {

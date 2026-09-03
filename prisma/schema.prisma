@@ -60,6 +60,7 @@ enum ConversationEventType {
   ASSIGNED
   MESSAGE_DELIVERY_UPDATED
   MERGED
+  DELETED
 }
 
 enum ConversationEventSink {

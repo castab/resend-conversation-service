@@ -8,6 +8,16 @@ and this project uses [Semantic Versioning](https://semver.org/). See
 
 ## [Unreleased]
 
+### Added
+
+- Added `DELETE /api/conversations/v2/{conversationId}` to permanently delete a
+  conversation along with its messages, outbox entries, and routing aliases.
+- Added a `conversation.deleted` conversation event, published through the
+  existing NATS JetStream outbox before the conversation is removed. Deleting
+  a conversation also purges its earlier event history, so
+  `conversation.deleted` is the last event a subscriber will see for that
+  conversation.
+
 ## [0.7.0] - 2026-09-02
 
 ### Added
