@@ -8,85 +8,65 @@ and this project uses [Semantic Versioning](https://semver.org/). See
 
 ## [Unreleased]
 
-## [0.7.0-rc.7] - 2026-09-02
+## [0.7.0] - 2026-09-02
 
 ### Added
 
-- Added direct OTLP/HTTP application log export to Loki and shared
-  `OTEL_RESOURCE_ATTRIBUTES` deployment tags for metrics and logs.
-
-### Changed
-
-- Replaced the optional Alloy forwarding layer with native Prometheus OTLP
-  metric ingestion and native Loki OTLP log ingestion in the local
-  observability stack.
-- Added curated environment, service group, version, and revision filters to
-  the Grafana dashboard and documented direct OTLP operations for local Docker
-  and Railway deployments.
-
-## [0.7.0-rc.6] - 2026-09-02
+- Added an optional durable conversation lifecycle event feed published through
+  NATS JetStream, with per-sink delivery tracking, leases, retries,
+  per-conversation ordering, configuration validation, and startup connectivity
+  checks. The feed remains disabled when no sink is configured.
+- Added an AsyncAPI 3.1 contract for the seven conversation lifecycle event
+  types and exposed it from the unauthenticated `/asyncapi.json` endpoint.
+- Added an optional built-in cron scheduler that drains the shared email outbox.
+  It is disabled unless `OUTBOX_DRAIN_SCHEDULE_ENABLED` is `true` and supplements
+  rather than replaces `POST /api/emails/v2/outbox/drain`.
+- Added opt-in OpenTelemetry metrics and direct OTLP/HTTP application log export,
+  redacted structured JSON logs, and a local Grafana, Prometheus, Loki, and
+  Grafana Alloy Compose overlay.
 
 ### Changed
 
 - Made the OpenTelemetry metrics endpoint optional when telemetry is enabled and
-  allowed operators to supply any HTTP(S) collector URL without requiring the
-  `/v1/metrics` path.
-
-## [0.7.0-rc.5] - 2026-09-01
-
-### Added
-
-- Added opt-in OpenTelemetry metrics and redacted structured JSON logs, plus an
-  optional Grafana Alloy, Prometheus, Loki, and Grafana Compose overlay for
-  local observability.
-
-## [0.7.0-rc.4] - 2026-08-28
-
-### Added
-
-- Added an optional built-in cron scheduler that drains the shared email outbox
-  from inside the service. It is disabled unless
-  `OUTBOX_DRAIN_SCHEDULE_ENABLED` is `true`, is configured with
-  `OUTBOX_DRAIN_SCHEDULE`, `OUTBOX_DRAIN_SCHEDULE_TIMEZONE`,
-  `OUTBOX_DRAIN_SCHEDULE_BATCH_SIZE`, and `OUTBOX_DRAIN_SCHEDULE_MAX_BATCHES`,
-  and supplements rather than replaces `POST /api/emails/v2/outbox/drain`.
-  Deployments driven by an external trigger are unaffected.
-
-### Changed
-
+  allowed any HTTP(S) collector URL without requiring the `/v1/metrics` path.
+- Replaced the optional Alloy forwarding layer with native Prometheus OTLP
+  metric ingestion and native Loki OTLP log ingestion in the local observability
+  stack.
+- Added curated environment, service group, version, and revision filters to
+  the Grafana dashboard and documented direct OTLP operations for local Docker
+  and Railway deployments.
 - Retuned the checked-in JetStream provisioning config to lightweight defaults
-  and documented every field as an operator-tunable suggestion in
-  `infra/nats/streams/README.md`.
-- Corrected the `CONVERSATION_EVENTS_NATS_STREAM` example so it matches the
-  `name` in the checked-in stream config.
+  and documented every field as an operator-tunable suggestion.
+- Expanded API validation and consumer documentation to keep HTTP and broker
+  contracts synchronized.
+- Defaulted destructive integration tests to the dedicated local Docker Compose
+  `resend_test` database when `TEST_DATABASE_URL` is not provided, without
+  falling back to `DATABASE_URL`.
+
+### Fixed
+
+- Included the underlying conversation event sink startup error in diagnostic
+  logs without logging credentials.
 
 ### Removed
 
-- Removed the Kafka conversation event sink. NATS JetStream is now the only
-  supported transport: the `kafkajs` dependency, every
-  `CONVERSATION_EVENTS_KAFKA_*` variable, the `KAFKA` value of the
-  `ConversationEventSink` enum, and the Kafka server, channel, operation, and
-  message bindings in `public/asyncapi.json` are gone. Kafka may return in a
-  later version; the sink abstraction and the plural `CONVERSATION_EVENTS_SINKS`
-  variable were kept for that.
+- Removed the Kafka conversation-event sink. NATS JetStream is the only
+  supported transport; Kafka configuration, dependencies, and AsyncAPI bindings
+  are gone.
 
 ### Upgrade notes
 
-- The `20260820000000_add_conversation_events` migration was rewritten in place
-  to create `ConversationEventSink` with `NATS` only, rather than superseded by
-  a corrective migration. This is acceptable only because the migration has
-  shipped solely in `0.7.0` release candidates.
+- The `20260820000000_add_conversation_events` migration creates
+  `ConversationEventSink` with `NATS` only. This migration was revised during
+  the 0.7.0 release-candidate period and has not shipped in a stable release.
 - Upgrading needs no action. `prisma migrate deploy` treats the migration as
   already applied and reports no pending migrations, so an existing database
   deploys normally. A reset is not required.
-- An existing database does keep two harmless remnants: the unused `KAFKA`
-  value on the `ConversationEventSink` enum, and a now-stale checksum recorded
-  for that migration. Nothing can write the enum value, and the deploy path
-  does not read the checksum. A database created from scratch on this version
-  has neither.
-- To make an existing database match a fresh install, run this once. It is
-  optional, and the `DELETE` discards any conversation events still awaiting
-  delivery to a previously enabled Kafka sink:
+- Databases initialized from an earlier 0.7.0 RC retain an unused `KAFKA` enum
+  value and a stale migration checksum. Nothing can write the enum value, and
+  `prisma migrate deploy` does not read the checksum. To make those databases
+  match a fresh install, run this optional operation. The `DELETE` discards
+  conversation events still awaiting delivery to the former Kafka sink:
 
   ```sql
   BEGIN;
@@ -102,42 +82,6 @@ and this project uses [Semantic Versioning](https://semver.org/). See
     WHERE migration_name = '20260820000000_add_conversation_events';
   COMMIT;
   ```
-
-## [0.7.0-rc.3] - 2026-08-20
-
-### Added
-
-- Added an AsyncAPI 3.1 contract for all seven conversation lifecycle event
-  types and exposed it at the unauthenticated `/asyncapi.json` documentation
-  endpoint.
-
-### Changed
-
-- Expanded API validation, release metadata checks, consumer documentation,
-  and the repository API integration skill to keep HTTP and broker contracts
-  synchronized.
-- Defaulted destructive integration tests to the dedicated local Docker
-  Compose `resend_test` database when `TEST_DATABASE_URL` is not provided,
-  without falling back to `DATABASE_URL`.
-
-## [0.7.0-rc.2] - 2026-08-20
-
-### Fixed
-
-- Included the underlying conversation event sink startup error in the
-  diagnostic log without logging credentials.
-
-## [0.7.0-rc.1] - 2026-08-20
-
-### Added
-
-- Added an optional durable conversation event feed that publishes compact,
-  versioned lifecycle events to NATS JetStream, Kafka, or both concurrently.
-- Added per-sink delivery tracking, leases, retries, per-conversation ordering,
-  and aggregate readiness reporting while enabled sinks are unhealthy.
-- Added configuration validation and startup connectivity checks for the NATS
-  and Kafka conversation event sinks. The feature remains disabled when no sink
-  is configured.
 
 ## [0.6.0] - 2026-08-15
 
