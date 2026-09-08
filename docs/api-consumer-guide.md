@@ -1,6 +1,6 @@
 # API Consumer Guide
 
-Contract version: `0.8.0`
+Contract version: `0.7.2-rc.1`
 
 ## Service purpose
 
@@ -665,7 +665,7 @@ curl -i \
 - Current conversation API: V2. Conversation API V1 was retired in 0.5.0 and its paths return `404`.
 - OpenAPI version: `3.1.1`.
 - AsyncAPI version: `3.1.0`; conversation event payload schema version: `1`.
-- Contract/package version observed in repository: `0.8.0`.
+- Contract/package version observed in repository: `0.7.2-rc.1`.
 - Attachments are an opt-in deployment feature gated by `ATTACHMENTS_ENABLED`. With it disabled, responses are identical to 0.7.1 and the attachment routes return `404`. Consumers must not assume the `attachments` property exists.
 - Inbound attachment bytes are stored asynchronously, so an attachment can be visible as `pending` before it is downloadable. There is no callback for the transition; poll the conversation.
 - Attachment ingest has a bounded retry ladder and then marks an attachment `failed` permanently. There is no automatic re-ingest afterwards, and the provider's copy may have expired by then.
