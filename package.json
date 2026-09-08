@@ -17,6 +17,7 @@
     "lint:fix": "biome check . --write",
     "lint": "biome check .",
     "test": "vitest run",
+    "test:unit": "vitest run tests/conversation-event-runtime.test.ts tests/logger.test.ts tests/outbox-drain-scheduler.test.ts tests/send-request-hash.test.ts tests/telemetry.test.ts",
     "test:watch": "vitest",
     "test:postgresql": "vitest run tests/integration/webhook.postgresql.test.ts tests/integration/conversation.postgresql.test.ts tests/integration/direct-email.postgresql.test.ts",
     "telemetry:smoke": "node scripts/telemetry-smoke.mjs",

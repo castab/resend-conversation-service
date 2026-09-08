@@ -71,6 +71,9 @@ jobs:
           npm run lint
           npm run build
 
+      - name: Run unit tests
+        run: npm run test:unit
+
       - name: Start application
         run: |
           npm run start > app.log 2>&1 &

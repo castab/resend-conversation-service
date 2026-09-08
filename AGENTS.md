@@ -44,6 +44,11 @@
   duplicating drain logic, must fail startup on invalid schedule configuration,
   and must not gate `GET /api/health/v2`.
 - Require `Idempotency-Key` on every operation that can send or enqueue email.
+- Keep `request_hash` stable for request shapes that already exist. New
+  optional fields must only enter the normalized value when the caller supplies
+  them, or stored idempotency records stop matching on retry after an upgrade.
+  [tests/send-request-hash.test.ts](tests/send-request-hash.test.ts) pins the
+  released hashes; failing vectors mean the change is wrong, not the vectors.
 - Persist send intent before calling Resend and never add unbounded retries.
 - In V2, authorize canonical lowercase addresses by exact `(address, role)`
   matches in `email_address_allowlist_entries`. Keep `FROM` and `REPLY_TO`

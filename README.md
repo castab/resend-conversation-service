@@ -464,6 +464,17 @@ to the disposable `resend_test` database exposed by `docker-compose.yml` at
 still takes precedence, including in CI. The test harness never falls back to
 `DATABASE_URL` because integration tests truncate application tables.
 
+Unit tests need no database or application process:
+
+```bash
+npm run test:unit
+```
+
+They include `tests/send-request-hash.test.ts`, which pins the exact
+`request_hash` values the service computed at 0.7.1. Those hashes are stored
+next to every idempotency key, so a change that perturbs them would turn a
+client's legitimate retry into a spurious `409` after an upgrade.
+
 Prepare the database and start the test application:
 
 ```bash

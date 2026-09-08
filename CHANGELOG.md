@@ -54,9 +54,16 @@ and this project uses [Semantic Versioning](https://semver.org/). See
   disabled the check is unchanged.
 - Attachment filenames, storage keys, and download URLs are redacted from logs
   alongside the existing email fields.
+- CI now runs the unit suites, which it previously never did, via a new
+  `npm run test:unit` script.
 
 ### Upgrade notes
 
+- Request hashing is unchanged for every request shape that existed at 0.7.1.
+  `attachments` enters the hashed value only when a caller supplies it, so
+  idempotency records written before the upgrade still match on retry, whether
+  or not the feature is enabled. `tests/send-request-hash.test.ts` pins the
+  released hashes against regression.
 - **No action is required to upgrade.** `ATTACHMENTS_ENABLED` defaults to off,
   and with it off every response is byte-identical to 0.7.1: no `attachments`
   property is added anywhere, the new routes fall through to the terminal
