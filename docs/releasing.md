@@ -56,7 +56,18 @@ Run `npm run release:validate` before opening or merging a release PR.
    npm run api:validate
    npm run lint
    npm run build
+   npm run test:unit
    npm run test:postgresql
+   ```
+
+   `npm run test:postgresql` runs against an application started without
+   `ATTACHMENTS_ENABLED` and asserts that attachments stay invisible in that
+   mode. Cover the enabled path too, against a second application process with
+   the flag on and the Compose MinIO service running:
+
+   ```bash
+   docker compose up -d postgresql minio minio-init
+   npm run test:postgresql:attachments
    ```
 
 4. Open a pull request into `main` with the version and changelog updates.
