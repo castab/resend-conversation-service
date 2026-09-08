@@ -7,6 +7,7 @@ import { emitTelemetryLog } from './telemetry';
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 type LogValue = boolean | number | string | undefined;
 type SafeLogAttributeName =
+  | 'attempt'
   | 'credential'
   | 'duration_ms'
   | 'error_type'
@@ -14,7 +15,8 @@ type SafeLogAttributeName =
   | 'operation'
   | 'port'
   | 'route'
-  | 'status_code';
+  | 'status_code'
+  | 'terminal';
 type SafeLogAttributes = Partial<Record<SafeLogAttributeName, LogValue>>;
 
 const requestContext = new AsyncLocalStorage<{ requestId: string }>();
@@ -36,9 +38,12 @@ export function createLogger(destination?: DestinationStream): Logger {
       redact: {
         paths: [
           'address',
+          'attachments',
           'authorization',
           'body',
+          'downloadUrl',
           'email',
+          'filename',
           'from',
           'headers',
           'html',
@@ -46,15 +51,20 @@ export function createLogger(destination?: DestinationStream): Logger {
           'messageId',
           'replyTo',
           'resendEmailId',
+          'storageKey',
           'subject',
           'text',
           'to',
           '*.address',
+          '*.attachments',
           '*.authorization',
           '*.body',
+          '*.downloadUrl',
           '*.email',
+          '*.filename',
           '*.headers',
           '*.html',
+          '*.storageKey',
           '*.subject',
           '*.text',
         ],

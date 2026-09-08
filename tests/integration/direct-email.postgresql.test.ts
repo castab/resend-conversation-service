@@ -549,6 +549,47 @@ describe('Direct email API v2', () => {
     expect(projected.rows[0].delivery_state).toBe('DELIVERED');
   });
 
+  // The attachments feature must be invisible when its flag is off: the same
+  // payloads, the same status codes, and no reachable attachment routes.
+  it('behaves as though attachments do not exist while the flag is off', async () => {
+    await allowAddress('system@example.com', 'FROM');
+
+    const upload = await fetch(`${TEST_CONFIG.appBaseUrl}/api/attachments/v2`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${TEST_CONFIG.emailV2ApiKey}`,
+        'content-type': 'application/pdf',
+        'x-attachment-filename': 'nope.pdf',
+      },
+      body: new Uint8Array(Buffer.from('bytes')),
+    });
+    expect(upload.status).toBe(404);
+
+    const download = await fetch(
+      `${TEST_CONFIG.appBaseUrl}/api/attachments/v2/00000000-0000-7000-8000-00000000beef`,
+      { headers: { authorization: `Bearer ${TEST_CONFIG.emailV2ApiKey}` } },
+    );
+    expect(download.status).toBe(404);
+
+    const withAttachments = await send('flag-off-attachments', {
+      attachments: [{ id: '00000000-0000-7000-8000-00000000beef' }],
+    });
+    expect(withAttachments.status).toBe(400);
+    await expect(withAttachments.json()).resolves.toEqual({
+      error: 'attachments is not supported because attachments are disabled',
+    });
+
+    const plain = await send('flag-off-plain');
+    expect(plain.status).toBe(201);
+    const payload = (await plain.json()) as { email: Record<string, unknown> };
+    expect(Object.hasOwn(payload.email, 'attachments')).toBe(false);
+
+    const drained = await drain(TEST_CONFIG.outboxDrainApiKey, {});
+    expect(drained.status).toBe(200);
+    const result = (await drained.json()) as Record<string, unknown>;
+    expect(Object.hasOwn(result, 'attachments')).toBe(false);
+  });
+
   async function allowAddress(address: string, role: 'FROM' | 'REPLY_TO') {
     await database.query(
       `INSERT INTO email_address_allowlist_entries (address, role)

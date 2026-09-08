@@ -1,6 +1,6 @@
 # API Agent Handoff
 
-Contract version: `0.7.1`
+Contract version: `0.8.0`
 
 ## Sources
 
@@ -74,7 +74,9 @@ The complete application-operation layout:
 | --- | --- | --- |
 | `POST` | `/api/emails/v2` | Synchronously send direct email without conversation, Reply-To, or threading headers |
 | `POST` | `/api/emails/v2/outbox` | Persist and enqueue direct email in the shared outbox |
-| `POST` | `/api/emails/v2/outbox/drain` | Drain one shared direct/conversation batch at the only drain route |
+| `POST` | `/api/emails/v2/outbox/drain` | Drain one shared direct/conversation batch at the only drain route, plus the attachment lane when attachments are enabled |
+| `POST` | `/api/attachments/v2` | Upload attachment bytes; returns the ID a send references. Only when `ATTACHMENTS_ENABLED=true` |
+| `GET` | `/api/attachments/v2/{attachmentId}` | Stream a stored attachment. Only when `ATTACHMENTS_ENABLED=true` |
 | `POST`, `GET` | `/api/conversations/v2` | Create/send; list unassigned with `assignment=unassigned` |
 | `GET` | `/api/conversations/v2/summary` | Counts per conversation state plus a filterable page of conversation metadata |
 | `POST` | `/api/conversations/v2/outbox` | Enqueue opening message; pending idempotent replay also returns `202` |
@@ -132,6 +134,29 @@ subject; the service does not provision or mutate the stream. Persistent
 publication failure makes the event runtime unhealthy and readiness returns
 `503` until a clean drain cycle succeeds.
 
+## Attachments
+
+Optional, gated by `ATTACHMENTS_ENABLED`, off by default. With the flag off the
+contract is identical to 0.7.1: no `attachments` property on any response, the
+attachment routes return `404`, and a send body containing `attachments` is
+rejected with `400`. Probe support with `POST /api/attachments/v2`.
+
+- Upload bytes first, then reference the returned ID as
+  `attachments: [{ id, contentId? }]` on any V2 send or enqueue body.
+- One attachment belongs to exactly one message. An unknown, already-used, or
+  unstored ID fails the entire send with `400` before any provider call.
+- Inbound attachments are stored asynchronously and report
+  `state: "pending"` with a `null` `downloadPath` until the copy completes;
+  they then become `"stored"`, or `"failed"` if ingest gives up.
+  `conversation.message.received` may carry `attachmentCount`.
+- Download with the same bearer credential. `409` means still pending.
+- Queued sends with attachments use a separate lane that cannot be batched. It
+  drains through the same route and reports into an additive `attachments`
+  object on the drain result.
+- Inbound HTML is stored unmodified, so inline parts remain `cid:` references;
+  resolve them with each attachment's `contentId`.
+- Deleting a conversation deletes its attachments and their stored objects.
+
 ## Critical invariants
 
 1. One conversation exists per `(topicType, externalTopicId)` and has one external participant.
@@ -187,9 +212,9 @@ Conversations created before the V1 retirement are still stored with `apiVersion
 8. Schedule the shared drain with the dedicated credential at `/api/emails/v2/outbox/drain`. It is the only drain route. The service may instead be configured to run that drain on its own internal cron schedule, which is disabled by default and does not change this contract.
 9. Sanitize response HTML.
 10. Validate request and response models against upstream OpenAPI contract
-    `0.7.1`.
+    `0.8.0`.
 11. If consuming conversation events, generate or validate handlers against
-    AsyncAPI contract `0.7.1`, reject unsupported payload schema versions,
+    AsyncAPI contract `0.8.0`, reject unsupported payload schema versions,
     and persist event IDs for deduplication.
 
 ## Known concerns
@@ -198,11 +223,13 @@ Conversations created before the V1 retirement are still stored with `apiVersion
 - Topic lookup is more lenient than create/assignment for `externalTopicId` length. Keep it at 255 characters or fewer.
 - Some uncaught infrastructure failures may not return the standard JSON error envelope.
 - No formal client timeout, request correlation ID, or gateway exposure contract is published.
-- Health readiness requires `DATABASE_URL`, `RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET`, a valid `RESEND_REPLY_TO`, an EMAIL V2 credential, `OUTBOX_DRAIN_API_KEY`, and PostgreSQL connectivity. With `CONVERSATION_EVENTS_SINKS=NATS`, the configured NATS stream and subject must also be valid.
+- Health readiness requires `DATABASE_URL`, `RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET`, a valid `RESEND_REPLY_TO`, an EMAIL V2 credential, `OUTBOX_DRAIN_API_KEY`, and PostgreSQL connectivity. With `CONVERSATION_EVENTS_SINKS=NATS`, the configured NATS stream and subject must also be valid. With `ATTACHMENTS_ENABLED=true`, storage credentials must be present and the bucket reachable at startup, and a persistently failing ingest cycle returns `503` until recovery.
 - Runtime accepts trimmed, case-insensitive manual state values; use lowercase OpenAPI enum values.
 - Runtime webhook family acceptance is broader than the documented event enums; send only documented Resend event types.
 - Runtime and OpenAPI currently reset `stateChangedAt` after every successful manual state write, including a repeated value. This conflicts with the service lifecycle invariant that the timestamp should change only with the state value; avoid no-op state writes and do not depend on the reset.
 - Conversation runtime may ignore an explicitly empty body format when the other format is nonempty; keep every supplied `text` or `html` nonempty as required by OpenAPI.
 - Do not attach read-pagination query parameters to assignment or state mutations. An invalid undocumented `before` value can produce `400` after the mutation has committed.
 - Conversation events have no application-level dead-letter or terminal attempt limit. Persistently failing publication blocks later sequence values for that conversation, and event wire behavior lacks end-to-end AsyncAPI conformance coverage.
+- Attachment ingest retries on a bounded ladder and then marks an attachment `failed` permanently, with no automatic re-ingest. The provider copy may have expired by then.
+- Attachment-carrying queued sends are not batched, so that lane has lower throughput than the batch lane.
 - Dedicated tests cover central V2 identity, promotion, revocation, and routing behavior; not every mirrored read/mutation route has a separate V2 integration case.

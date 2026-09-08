@@ -1,6 +1,8 @@
 import 'dotenv/config';
 import { createServer } from 'node:http';
 import path from 'node:path';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import express, {
   type ErrorRequestHandler,
   type Request,
@@ -8,6 +10,15 @@ import express, {
 } from 'express';
 import swaggerUiDist from 'swagger-ui-dist';
 import { authorizeEmailV2, authorizeOutboxDrain } from '@/lib/api';
+import {
+  attachmentsEnabled,
+  getConfiguredAttachmentStorage,
+  resolveAttachmentLimits,
+  startAttachmentIngestRuntime,
+  startAttachmentReaperRuntime,
+  stopAttachmentIngestRuntime,
+  stopAttachmentReaperRuntime,
+} from '@/lib/attachments';
 import {
   startConversationEventRuntime,
   stopConversationEventRuntime,
@@ -28,6 +39,8 @@ import {
   recordHttpRequest,
   registerDatabaseGauges,
 } from '@/lib/telemetry-metrics';
+import { GET as downloadAttachmentV2 } from '@/routes/attachments/v2/[attachmentId]/route';
+import { POST as uploadAttachmentV2 } from '@/routes/attachments/v2/route';
 import { POST as enqueueMessageV2 } from '@/routes/conversations/v2/[conversationId]/messages/outbox/route';
 import { POST as sendMessageV2 } from '@/routes/conversations/v2/[conversationId]/messages/route';
 import {
@@ -132,6 +145,35 @@ function adapt(handler: Route): RequestHandler {
   };
 }
 
+/**
+ * Like adapt(), but pipes the response body instead of buffering it. Used for
+ * attachment downloads, which can be tens of megabytes.
+ */
+function adaptStream(handler: Route): RequestHandler {
+  return async (request, response, next) => {
+    try {
+      const result = await handler(toFetchRequest(request), {
+        params: Promise.resolve(request.params as Record<string, string>),
+      });
+      result.headers.forEach((value, name) => {
+        response.setHeader(name, value);
+      });
+      response.status(result.status);
+      if (!result.body) {
+        response.end();
+        return;
+      }
+      await pipeline(Readable.fromWeb(result.body as never), response);
+    } catch (error) {
+      if (response.headersSent) {
+        response.destroy();
+        return;
+      }
+      next(error);
+    }
+  };
+}
+
 export function createApp() {
   const app = express();
   app.disable('x-powered-by');
@@ -189,6 +231,29 @@ export function createApp() {
     rawBody,
     adapt(sendDirectEmailV2),
   );
+
+  // Registered only when the feature is on, so with it off these paths fall
+  // through to the terminal 404 exactly like the other retired surfaces.
+  // Authentication runs before the body parser so an unauthenticated caller
+  // can never make the process buffer a multi-megabyte upload.
+  if (attachmentsEnabled()) {
+    const attachmentBody = express.raw({
+      type: () => true,
+      limit: resolveAttachmentLimits().maxBytes,
+      inflate: false,
+    });
+    app.post(
+      '/api/attachments/v2',
+      requireEmailV2Auth,
+      attachmentBody,
+      adapt(uploadAttachmentV2),
+    );
+    app.get(
+      '/api/attachments/v2/:attachmentId',
+      requireEmailV2Auth,
+      adaptStream(downloadAttachmentV2),
+    );
+  }
 
   // Static conversation routes must precede /:conversationId routes.
   app.post(
@@ -325,6 +390,14 @@ async function startServer() {
       registerDatabaseGauges(client);
     }
     await startConversationEventRuntime(client);
+    if (attachmentsEnabled()) {
+      // Fail fast on unusable storage rather than accepting mail the service
+      // cannot durably keep, mirroring the conversation event stream check.
+      await getConfiguredAttachmentStorage().headBucket();
+      logEvent('info', 'attachment_storage_verified');
+    }
+    startAttachmentIngestRuntime(client);
+    startAttachmentReaperRuntime(client);
     startOutboxDrainScheduler(client);
     const port = Number(process.env.PORT ?? 3000);
     const host = process.env.HOST ?? process.env.HOSTNAME ?? '0.0.0.0';
@@ -340,6 +413,8 @@ async function startServer() {
       logEvent('info', 'application_shutdown_started');
       server.close(async () => {
         await stopOutboxDrainScheduler();
+        await stopAttachmentIngestRuntime();
+        await stopAttachmentReaperRuntime();
         await stopConversationEventRuntime();
         await client.$disconnect();
         logEvent('info', 'application_shutdown_completed');

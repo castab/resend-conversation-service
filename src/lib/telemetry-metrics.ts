@@ -79,6 +79,17 @@ function createInstruments() {
       'resend_conversation.conversation_event.delivery.count',
       { description: 'Conversation event delivery attempts', unit: '{event}' },
     ),
+    attachmentIngests: telemetryMeter.createCounter(
+      'resend_conversation.attachment.ingest.count',
+      {
+        description: 'Inbound attachment ingest attempts',
+        unit: '{attachment}',
+      },
+    ),
+    attachmentReaps: telemetryMeter.createCounter(
+      'resend_conversation.attachment.reap.count',
+      { description: 'Stored object deletion attempts', unit: '{object}' },
+    ),
   };
 }
 
@@ -95,9 +106,22 @@ export function changeHttpActive(delta: number, attributes: Attributes) {
   getInstruments().httpActive.add(delta, attributes);
 }
 
+export type ProviderOperation =
+  | 'send'
+  | 'send_batch'
+  | 'get_sent'
+  | 'get_received'
+  | 'list_received_attachments'
+  | 'get_received_attachment'
+  | 'download_attachment'
+  | 'storage_put'
+  | 'storage_get'
+  | 'storage_delete'
+  | 'storage_head_bucket';
+
 export function recordProviderRequest(
   durationSeconds: number,
-  operation: 'send' | 'send_batch' | 'get_sent' | 'get_received',
+  operation: ProviderOperation,
   outcome: 'success' | 'failure',
   statusClass: 'none' | '2xx' | '4xx' | '5xx',
 ) {
@@ -161,6 +185,16 @@ export function recordConversationEventDelivery(
   outcome: 'published' | 'retry_scheduled' | 'failed',
 ) {
   getInstruments().eventDeliveries.add(1, { sink: 'nats', outcome });
+}
+
+export function recordAttachmentIngest(
+  outcome: 'stored' | 'retry_scheduled' | 'failed',
+) {
+  getInstruments().attachmentIngests.add(1, { outcome });
+}
+
+export function recordAttachmentReap(outcome: 'deleted' | 'retry_scheduled') {
+  getInstruments().attachmentReaps.add(1, { outcome });
 }
 
 /** Register lightweight read-only business gauges once telemetry is enabled. */

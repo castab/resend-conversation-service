@@ -1,6 +1,6 @@
 {
   "name": "resend-conversation-service",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "private": true,
   "packageManager": "npm@11.18.0",
   "engines": {
@@ -24,9 +24,11 @@
     "db:migrate:deploy": "prisma migrate deploy",
     "db:setup": "npm run db:generate && npm run db:migrate:deploy",
     "db:studio": "dotenv -e .env.test -- prisma studio",
-    "db:validate": "prisma validate"
+    "db:validate": "prisma validate",
+    "test:postgresql:attachments": "vitest run tests/integration/attachments.postgresql.test.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "3.1128.0",
     "@opentelemetry/api": "1.9.1",
     "@opentelemetry/api-logs": "0.222.0",
     "@opentelemetry/exporter-logs-otlp-proto": "0.222.0",

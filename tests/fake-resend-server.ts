@@ -1,6 +1,10 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import type { ResendEmail, SendEmailInput } from '@/lib/email';
+import type {
+  ResendEmail,
+  ResendReceivedAttachment,
+  SendEmailInput,
+} from '@/lib/email';
 
 export class FakeResendServer {
   private server: Server | null = null;
@@ -35,6 +39,30 @@ export class FakeResendServer {
     ids: string[];
   }> = [];
   readonly received = new Map<string, ResendEmail>();
+  /** Attachment bytes keyed by attachment id, served through a signed-style URL. */
+  readonly attachmentBodies = new Map<string, Buffer>();
+  attachmentDownloadFailuresRemaining = 0;
+  attachmentDownloadRequestCount = 0;
+  expireNextDownloadUrl = false;
+  private baseUrl = 'http://localhost:4010';
+
+  /** Registers an inbound attachment on a received email. */
+  addReceivedAttachment(
+    emailId: string,
+    attachment: Omit<ResendReceivedAttachment, 'size'> & { size?: number },
+    body: Buffer,
+  ) {
+    const email = this.received.get(emailId);
+    if (!email) {
+      throw new Error(`Unknown received email ${emailId}`);
+    }
+    const entry: ResendReceivedAttachment = {
+      ...attachment,
+      size: attachment.size ?? body.byteLength,
+    };
+    email.attachments = [...(email.attachments ?? []), entry];
+    this.attachmentBodies.set(attachment.id, body);
+  }
 
   pauseNextSend() {
     let arrived = () => {};
@@ -51,6 +79,7 @@ export class FakeResendServer {
 
   async start(url: string) {
     const target = new URL(url);
+    this.baseUrl = url.replace(/[/]$/, '');
     this.server = createServer(async (request, response) => {
       try {
         await this.handle(request, response);
@@ -89,6 +118,10 @@ export class FakeResendServer {
     this.sentMetadataFailuresRemaining = 0;
     this.sentMetadataRequestCount = 0;
     this.received.clear();
+    this.attachmentBodies.clear();
+    this.attachmentDownloadFailuresRemaining = 0;
+    this.attachmentDownloadRequestCount = 0;
+    this.expireNextDownloadUrl = false;
     this.received.set('em_received123', {
       id: 'em_received123',
       message_id: '<received123@example.com>',
@@ -111,6 +144,20 @@ export class FakeResendServer {
       this.server?.close((error) => (error ? reject(error) : resolve()));
     });
     this.server = null;
+  }
+
+  private withDownloadUrl(
+    attachment: ResendReceivedAttachment,
+  ): ResendReceivedAttachment {
+    const expired = this.expireNextDownloadUrl;
+    this.expireNextDownloadUrl = false;
+    return {
+      ...attachment,
+      download_url: `${this.baseUrl}/attachment-bytes/${encodeURIComponent(
+        attachment.id,
+      )}${expired ? '?expired=true' : ''}`,
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    };
   }
 
   private async handle(
@@ -203,6 +250,67 @@ export class FakeResendServer {
         return json(response, 200, {});
       }
       return json(response, 200, { id });
+    }
+
+    const attachmentBytesMatch = url.pathname.match(
+      /^\/attachment-bytes\/([^/]+)$/,
+    );
+    if (request.method === 'GET' && attachmentBytesMatch) {
+      this.attachmentDownloadRequestCount++;
+      if (url.searchParams.get('expired') === 'true') {
+        return json(response, 403, { error: 'url_expired' });
+      }
+      if (this.attachmentDownloadFailuresRemaining > 0) {
+        this.attachmentDownloadFailuresRemaining--;
+        return json(response, 500, { error: 'simulated_download_failure' });
+      }
+      const body = this.attachmentBodies.get(
+        decodeURIComponent(attachmentBytesMatch[1]),
+      );
+      if (!body) {
+        return json(response, 404, { error: 'not_found' });
+      }
+      response.writeHead(200, {
+        'content-type': 'application/octet-stream',
+        'content-length': String(body.byteLength),
+      });
+      response.end(body);
+      return;
+    }
+
+    const attachmentDetailMatch = url.pathname.match(
+      /^\/emails\/receiving\/([^/]+)\/attachments\/([^/]+)$/,
+    );
+    if (request.method === 'GET' && attachmentDetailMatch) {
+      const email = this.received.get(
+        decodeURIComponent(attachmentDetailMatch[1]),
+      );
+      const attachment = email?.attachments?.find(
+        (item) => item.id === decodeURIComponent(attachmentDetailMatch[2]),
+      );
+      if (!attachment) {
+        return json(response, 404, { error: 'not_found' });
+      }
+      return json(response, 200, this.withDownloadUrl(attachment));
+    }
+
+    const attachmentListMatch = url.pathname.match(
+      /^\/emails\/receiving\/([^/]+)\/attachments$/,
+    );
+    if (request.method === 'GET' && attachmentListMatch) {
+      const email = this.received.get(
+        decodeURIComponent(attachmentListMatch[1]),
+      );
+      if (!email) {
+        return json(response, 404, { error: 'not_found' });
+      }
+      return json(response, 200, {
+        object: 'list',
+        has_more: false,
+        data: (email.attachments ?? []).map((attachment) =>
+          this.withDownloadUrl(attachment),
+        ),
+      });
     }
 
     const receivedMatch = url.pathname.match(/^\/emails\/receiving\/([^/]+)$/);

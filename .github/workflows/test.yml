@@ -33,6 +33,20 @@ jobs:
           --health-timeout=5s
           --health-retries=5
 
+      minio:
+        image: bitnami/minio:2025
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+          MINIO_DEFAULT_BUCKETS: resend-attachments
+        ports:
+          - 9000:9000
+        options: >-
+          --health-cmd="curl -sf http://localhost:9000/minio/health/live"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
     steps:
       - uses: actions/checkout@v4
 
@@ -90,6 +104,64 @@ jobs:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/resend_test
           TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/resend_test
 
+      - name: Start application with attachments enabled
+        run: |
+          PORT=3001 npm run start > app-attachments.log 2>&1 &
+        env:
+          RESEND_WEBHOOK_SECRET: whsec_dGVzdF9zZWNyZXRfa2V5X2Zvcl90ZXN0aW5nXzEyMzQ=
+          RESEND_API_KEY: test-resend-api-key
+          RESEND_API_BASE_URL: http://localhost:4011
+          RESEND_REPLY_TO: mailbox@replies.example.com
+          EMAIL_V2_API_KEY: test-conversation-v2-api-key
+          OUTBOX_DRAIN_API_KEY: test-outbox-drain-api-key
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/resend_test
+          ATTACHMENTS_ENABLED: "true"
+          ATTACHMENTS_S3_BUCKET: resend-attachments
+          ATTACHMENTS_S3_REGION: us-east-1
+          ATTACHMENTS_S3_ENDPOINT: http://localhost:9000
+          ATTACHMENTS_S3_FORCE_PATH_STYLE: "true"
+          ATTACHMENTS_S3_ACCESS_KEY_ID: minioadmin
+          ATTACHMENTS_S3_SECRET_ACCESS_KEY: minioadmin
+
+      - name: Wait for the attachments application
+        run: |
+          for i in {1..30}; do
+            curl --fail --silent http://localhost:3001/api/health/v2 && break
+            sleep 1
+          done
+          curl --fail --silent http://localhost:3001/api/health/v2 > /dev/null || (cat app-attachments.log && exit 1)
+
+      - name: Run attachment tests
+        run: npm run test:postgresql:attachments
+        env:
+          RESEND_WEBHOOK_SECRET: whsec_dGVzdF9zZWNyZXRfa2V5X2Zvcl90ZXN0aW5nXzEyMzQ=
+          RESEND_API_KEY: test-resend-api-key
+          RESEND_API_BASE_URL: http://localhost:4011
+          RESEND_REPLY_TO: mailbox@replies.example.com
+          EMAIL_V2_API_KEY: test-conversation-v2-api-key
+          OUTBOX_DRAIN_API_KEY: test-outbox-drain-api-key
+          APP_BASE_URL: http://localhost:3001
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/resend_test
+          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/resend_test
+          ATTACHMENTS_ENABLED: "true"
+
+      - name: Assert attachments fail startup without storage credentials
+        run: |
+          set +e
+          ATTACHMENTS_ENABLED=true node scripts/validate-runtime-env.mjs > env-check.log 2>&1
+          status=$?
+          set -e
+          test "$status" != "0" || (echo "expected a nonzero exit" && exit 1)
+          grep -q runtime_attachments_configuration_missing env-check.log
+          ! grep -qi secret env-check.log
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/resend_test
+          RESEND_API_KEY: test-resend-api-key
+          RESEND_WEBHOOK_SECRET: whsec_dGVzdF9zZWNyZXRfa2V5X2Zvcl90ZXN0aW5nXzEyMzQ=
+          RESEND_REPLY_TO: mailbox@replies.example.com
+          EMAIL_V2_API_KEY: test-conversation-v2-api-key
+          OUTBOX_DRAIN_API_KEY: test-outbox-drain-api-key
+
       - name: Build production image
         run: docker build -t resend-conversation-service:test .
 
@@ -117,4 +189,5 @@ jobs:
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://localhost:3100/api/health/v1)" = "404"
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://localhost:3100/api/conversations/v2?assignment=unassigned)" = "401"
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://localhost:3100/api/conversations/v1?assignment=unassigned)" = "404"
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://localhost:3100/api/attachments/v2/00000000-0000-7000-8000-00000000beef)" = "404"
           docker rm -f resend-conversation-service-smoke

@@ -1,4 +1,16 @@
-import { recordProviderRequest } from '@/lib/telemetry-metrics';
+import {
+  type ProviderOperation,
+  recordProviderRequest,
+} from '@/lib/telemetry-metrics';
+
+const ATTACHMENT_DOWNLOAD_TIMEOUT_MS = 60_000;
+
+export interface SendEmailAttachmentInput {
+  filename: string;
+  content: string;
+  content_type?: string;
+  content_id?: string;
+}
 
 export interface SendEmailInput {
   from: string;
@@ -9,6 +21,18 @@ export interface SendEmailInput {
   html?: string;
   headers?: Record<string, string>;
   tags?: Array<{ name: string; value: string }>;
+  attachments?: SendEmailAttachmentInput[];
+}
+
+export interface ResendReceivedAttachment {
+  id: string;
+  filename: string;
+  size: number;
+  content_type: string;
+  content_disposition?: string;
+  content_id?: string | null;
+  download_url?: string;
+  expires_at?: string;
 }
 
 export interface ResendEmail {
@@ -23,6 +47,7 @@ export interface ResendEmail {
   headers?: Record<string, string>;
   reply_to?: string[];
   received_for?: string[];
+  attachments?: ResendReceivedAttachment[];
 }
 
 export interface ResendEmailClient {
@@ -33,6 +58,14 @@ export interface ResendEmailClient {
   ): Promise<{ data: Array<{ id: string }> }>;
   getSent(id: string): Promise<ResendEmail>;
   getReceived(id: string): Promise<ResendEmail>;
+  listReceivedAttachments(
+    emailId: string,
+  ): Promise<{ data: ResendReceivedAttachment[]; has_more: boolean }>;
+  getReceivedAttachment(
+    emailId: string,
+    attachmentId: string,
+  ): Promise<ResendReceivedAttachment>;
+  downloadAttachment(downloadUrl: string): Promise<Buffer>;
 }
 
 export class ResendApiError extends Error {
@@ -55,7 +88,7 @@ export function createResendEmailClient({
   baseUrl?: string;
 }): ResendEmailClient {
   async function request<T>(
-    operation: 'send' | 'send_batch' | 'get_sent' | 'get_received',
+    operation: ProviderOperation,
     path: string,
     init?: RequestInit,
   ): Promise<T> {
@@ -152,6 +185,48 @@ export function createResendEmailClient({
         'get_received',
         `/emails/receiving/${encodeURIComponent(id)}?html_format=cid`,
       );
+    },
+    listReceivedAttachments(emailId) {
+      return request<{ data: ResendReceivedAttachment[]; has_more: boolean }>(
+        'list_received_attachments',
+        `/emails/receiving/${encodeURIComponent(emailId)}/attachments?limit=100`,
+      );
+    },
+    getReceivedAttachment(emailId, attachmentId) {
+      return request<ResendReceivedAttachment>(
+        'get_received_attachment',
+        `/emails/receiving/${encodeURIComponent(emailId)}/attachments/${encodeURIComponent(attachmentId)}`,
+      );
+    },
+    // Signed download URLs are pre-authorized and short lived, so they are
+    // fetched without the API credential and never persisted.
+    async downloadAttachment(downloadUrl) {
+      const startedAt = performance.now();
+      let outcome: 'success' | 'failure' = 'failure';
+      let statusClass: 'none' | '2xx' | '4xx' | '5xx' = 'none';
+      try {
+        const response = await fetch(downloadUrl, {
+          signal: AbortSignal.timeout(ATTACHMENT_DOWNLOAD_TIMEOUT_MS),
+        });
+        statusClass = responseStatusClass(response.status);
+        if (!response.ok) {
+          throw new ResendApiError(
+            `Attachment download failed with status ${response.status}`,
+            response.status,
+            '',
+          );
+        }
+        const body = Buffer.from(await response.arrayBuffer());
+        outcome = 'success';
+        return body;
+      } finally {
+        recordProviderRequest(
+          (performance.now() - startedAt) / 1_000,
+          'download_attachment',
+          outcome,
+          statusClass,
+        );
+      }
     },
   };
 }

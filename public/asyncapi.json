@@ -3,7 +3,7 @@
   "id": "urn:resend-conversation-service:conversation-events",
   "info": {
     "title": "resend-conversation-service Conversation Events API",
-    "version": "0.7.1",
+    "version": "0.8.0",
     "description": "Versioned, non-sensitive conversation lifecycle events published to NATS JetStream. Transport-specific metadata is described on the channel."
   },
   "defaultContentType": "application/json",
@@ -661,6 +661,11 @@
           "cause": {
             "type": "string",
             "const": "inbound_email"
+          },
+          "attachmentCount": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Number of attachments projected with this message. Present only when the message carried attachments and the publishing service runs with ATTACHMENTS_ENABLED=true. The bytes are stored asynchronously, so they may not be downloadable yet when this event is delivered."
           }
         }
       },

@@ -54,7 +54,9 @@ export async function drainEmailOutbox(
 
   try {
     const response = await getConfiguredResendClient().sendBatch(
-      claimed.messages.map(buildSendEmailInput),
+      // This lane never carries attachments; those are queued separately
+      // because Resend's batch endpoint cannot send them.
+      claimed.messages.map((message) => buildSendEmailInput(message)),
       `conversation-outbox/${claimed.id}`,
     );
     if (

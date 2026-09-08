@@ -61,6 +61,8 @@ POST  /api/webhooks/resend/v1
 POST  /api/emails/v2
 POST  /api/emails/v2/outbox
 POST  /api/emails/v2/outbox/drain
+POST  /api/attachments/v2
+GET   /api/attachments/v2/{attachmentId}
 POST  /api/conversations/v2
 GET   /api/conversations/v2?assignment=unassigned
 GET   /api/conversations/v2/summary
@@ -81,7 +83,9 @@ The unauthenticated readiness endpoint is `/api/health/v2`.
 signature over the exact raw body and all three Svix headers. Conversation
 operations and direct email require `EMAIL_v2_API_KEY` (or `EMAIL_V2_API_KEY`
 as a fallback). The shared outbox drain route uses `OUTBOX_DRAIN_API_KEY`. Sending
-and enqueueing operations also require `Idempotency-Key`.
+and enqueueing operations also require `Idempotency-Key`. The attachment
+routes use `EMAIL_v2_API_KEY` and are registered only when
+`ATTACHMENTS_ENABLED=true`; otherwise they fall through to the terminal `404`.
 
 `POST /api/webhooks/resend/v1` remains the supported long-term Resend webhook
 ingress. Its `v1` path is unrelated to the retired conversation API and will
@@ -205,6 +209,10 @@ CONVERSATION_EVENTS_SINKS=
 
 # Optional: leave unset to keep the built-in drain scheduler disabled.
 OUTBOX_DRAIN_SCHEDULE_ENABLED=
+
+# Optional: leave unset to keep attachments disabled.
+# When set to true, S3 credentials become required and are verified at startup.
+ATTACHMENTS_ENABLED=
 ```
 
 Callers use `EMAIL_v2_API_KEY` and select only database-allowlisted identities
@@ -249,6 +257,74 @@ messages can still receive replies.
 `RESEND_API_BASE_URL` is optional and intended for a Resend-compatible test
 endpoint. The health route requires every variable above and database access;
 it returns `503` if any application capability is not configured.
+
+### Attachments
+
+Attachments are off by default. With `ATTACHMENTS_ENABLED` unset, the service
+behaves exactly as it did before the feature existed: no `attachments` property
+appears on any response, the attachment routes return `404`, and inbound
+attachments are ignored. Nothing needs to change to upgrade.
+
+Set `ATTACHMENTS_ENABLED=true` to turn it on. Storage configuration then becomes
+required, and the service verifies the bucket at startup and refuses to boot if
+it is unreachable. It never creates the bucket.
+
+```env
+ATTACHMENTS_ENABLED=true
+ATTACHMENTS_S3_BUCKET=resend-attachments
+ATTACHMENTS_S3_REGION=us-east-1
+ATTACHMENTS_S3_ACCESS_KEY_ID=...
+ATTACHMENTS_S3_SECRET_ACCESS_KEY=...
+
+# Non-AWS storage, such as MinIO:
+ATTACHMENTS_S3_ENDPOINT=http://localhost:9000
+ATTACHMENTS_S3_FORCE_PATH_STYLE=true
+
+# Optional limits. The defaults keep one message under Resend's 40 MB ceiling
+# once attachments are base64 encoded.
+ATTACHMENTS_S3_KEY_PREFIX=
+ATTACHMENTS_MAX_BYTES=26214400
+ATTACHMENTS_MAX_TOTAL_BYTES=29360128
+ATTACHMENTS_MAX_COUNT=20
+```
+
+The service needs `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject`, and
+`s3:ListBucket` on the bucket.
+
+**Sending.** Upload the bytes first, then reference the returned ID:
+
+```bash
+curl -X POST http://localhost:3000/api/attachments/v2   -H "authorization: Bearer $EMAIL_v2_API_KEY"   -H "content-type: application/pdf"   -H "x-attachment-filename: invoice.pdf"   --data-binary @invoice.pdf
+```
+
+The response carries an `id`. Pass it in the send body as
+`"attachments": [{ "id": "<id>" }]`, optionally with `contentId` to make the
+part inline and addressable from HTML as `cid:<contentId>`. An attachment can be
+claimed by exactly one message, and the claim happens in the same transaction
+that persists the send intent. Uploads never referenced by a send are collected
+after 24 hours.
+
+Queued sends that carry attachments use a separate outbox lane, because Resend
+cannot send attachments through its batch endpoint. Both lanes are drained by
+the same `POST /api/emails/v2/outbox/drain` route; the attachment lane's outcome
+is reported in an additional `attachments` object on the result.
+
+**Receiving.** The webhook records attachment metadata alongside the message and
+returns immediately; a background runtime then copies the bytes out of Resend,
+whose download URLs expire. An attachment therefore reports `state: "pending"`
+until its bytes are stored, and its `downloadPath` is `null` until then.
+Inbound HTML is stored unmodified, so inline images still reference `cid:` URLs;
+resolve them against each attachment's `contentId`.
+
+**Reading.** Messages gain an `attachments` array. Fetch the bytes from
+`GET /api/attachments/v2/{attachmentId}` with the same bearer credential; the
+service streams from storage, so the bucket and its credentials are never
+exposed to callers.
+
+**Deletion.** Object lifetime is tied to the message that owns it. Deleting a
+conversation cascades to its attachment rows inside PostgreSQL, and a database
+trigger records each removed object so a reaper deletes it from storage with
+retries. No bucket lifecycle rule is required.
 
 ### V2 identity allowlist
 
@@ -403,6 +479,23 @@ npm run test:postgresql
 
 `TEST_DATABASE_URL` is deliberately separate from `DATABASE_URL` so tests never
 fall back to an application or production database for destructive cleanup.
+
+The suite above runs against an application started **without**
+`ATTACHMENTS_ENABLED`, and asserts that the attachments feature is invisible in
+that mode. The attachment suite needs its own application process with the flag
+on and a running MinIO, both provided by `docker-compose.yml`:
+
+```bash
+docker compose up -d postgresql minio minio-init
+```
+
+Start a second application with attachments enabled, then run:
+
+```bash
+npm run test:postgresql:attachments
+```
+
+CI runs both, on two ports, against the same database.
 
 ## Docker
 

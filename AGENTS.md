@@ -21,7 +21,9 @@
   constraints and acknowledge completed duplicates with `200`.
 - Return `500` when required inbound retrieval or projection fails so Resend can
   retry. Do not acknowledge incomplete projection work.
-- Do not fetch attachments.
+- Do not fetch attachment bytes during webhook processing. Project attachment
+  metadata inside the same transaction as the message and let the ingest
+  runtime copy the bytes.
 
 ## Conversation API
 
@@ -95,6 +97,33 @@
   `OUTBOX_DRAIN_API_KEY`. Direct and conversation intent may share one ordered
   batch and its retry or terminal outcome.
 
+## Attachments
+
+- Keep attachments behind `ATTACHMENTS_ENABLED`. With the flag off the service
+  must behave exactly as it did before the feature existed: no `attachments`
+  property on any response, no reachable attachment routes, and no new required
+  configuration.
+- Reject a send whose body carries `attachments` while the flag is off. Never
+  silently drop a caller's attachment.
+- Fail startup when the flag is on and object storage is unusable. Verify the
+  bucket once at boot; never create it from the service.
+- Keep attachment bytes out of the webhook request path. Inbound projection
+  records `PENDING` rows; the ingest runtime fetches a fresh signed URL per
+  attempt and never persists one, because Resend expires them.
+- Queue attachment-carrying outbound intent in its own lane. Resend cannot send
+  attachments through its batch endpoint, so that lane is drained one message at
+  a time. Keep it behind the single `POST /api/emails/v2/outbox/drain` route and
+  report it as an additive `attachments` object on the existing result.
+- Resolve attachment bytes before opening a send transaction. They can be tens
+  of megabytes and must not hold a transaction open.
+- Keep the `email_attachments` delete trigger. Conversation deletes cascade
+  inside PostgreSQL, so the trigger is the only thing that observes every delete
+  path and records the stored object for removal.
+- Serve downloads through the service under `EMAIL_v2_API_KEY`. Do not hand out
+  pre-signed URLs or expose the bucket, endpoint, or credentials to callers.
+- Treat filenames as untrusted remote input. Strip directory components and
+  control characters before storing or returning them.
+
 ## Database
 
 - Treat `prisma/schema.prisma` and checked-in migrations as authoritative.
@@ -103,7 +132,8 @@
   constraints.
 - Never edit or commit `src/generated/prisma`.
 - Run `npm run db:validate` and `npm run db:generate` after schema changes.
-- Treat all email-related columns as sensitive and avoid logging values.
+- Treat all email-related columns as sensitive and avoid logging values,
+  including attachment filenames and storage keys.
 
 ## Email Behavior
 

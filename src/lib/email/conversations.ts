@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { projectInboundAttachments } from '@/lib/attachments/projection';
 import { appendConversationEvent } from '@/lib/conversation-events';
 import type { EmailConversation, EmailMessage } from '@/lib/database';
 import { Prisma, type PrismaClient } from '@/lib/database';
@@ -587,6 +588,13 @@ export async function projectInboundEmail(
             },
           });
 
+          const attachmentCount = await projectInboundAttachments(
+            transaction,
+            message.id,
+            eventData.email_id,
+            email,
+          );
+
           if (createdConversation) {
             await appendConversationEvent(transaction, {
               conversationId: conversation.id,
@@ -603,6 +611,7 @@ export async function projectInboundEmail(
             actor: 'participant',
             cause: 'inbound_email',
             messageId: message.id,
+            ...(attachmentCount ? { attachmentCount } : {}),
           });
 
           await transaction.emailMessage.updateMany({

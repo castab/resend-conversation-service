@@ -1,9 +1,11 @@
+import { buildSendAttachments } from '@/lib/attachments';
 import type { EmailMessage, PrismaClient } from '@/lib/database';
 import {
   getConfiguredResendClient,
   ResendApiError,
   reconcileOutboundDeliveryState,
   recordOutboundInternetMessageId,
+  type SendEmailAttachmentInput,
   type SendEmailInput,
 } from '@/lib/email';
 import { logEvent } from '@/lib/logger';
@@ -15,6 +17,10 @@ export async function deliverPendingMessage(
   messageId: string,
 ) {
   let sendError: unknown;
+  // Attachment bytes are resolved before the transaction opens. They can be
+  // tens of megabytes, and the send transaction runs under a 25s timeout that
+  // must not be held open across an object-storage download.
+  const attachments = await buildSendAttachments(client, messageId);
   const result = await client.$transaction(
     async (transaction) => {
       await transaction.$queryRaw`
@@ -33,7 +39,7 @@ export async function deliverPendingMessage(
         }
         const resend = getConfiguredResendClient();
         const sent = await resend.send(
-          buildSendEmailInput(message),
+          buildSendEmailInput(message, attachments),
           `${message.kind === 'DIRECT' ? 'email' : 'conversation'}/${message.id}`,
         );
         await transaction.emailMessage.update({
@@ -191,7 +197,10 @@ function formatAddress(address: string, name: string | null): string {
   return `"${escaped}" <${address}>`;
 }
 
-export function buildSendEmailInput(message: EmailMessage): SendEmailInput {
+export function buildSendEmailInput(
+  message: EmailMessage,
+  attachments: SendEmailAttachmentInput[] = [],
+): SendEmailInput {
   const tags = getTags(message);
   return {
     from: formatAddress(message.fromAddress, message.fromName),
@@ -207,6 +216,7 @@ export function buildSendEmailInput(message: EmailMessage): SendEmailInput {
     ...(message.textBody === null ? {} : { text: message.textBody }),
     ...(message.htmlBody === null ? {} : { html: message.htmlBody }),
     ...(tags.length ? { tags } : {}),
+    ...(attachments.length ? { attachments } : {}),
     ...(message.inReplyToInternetMessageId
       ? {
           headers: {

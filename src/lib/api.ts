@@ -1,5 +1,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
+import { attachmentsEnabled } from '@/lib/attachments';
 import {
+  type EmailAttachment,
   type EmailConversation,
   type EmailMessage,
   getPrismaClient,
@@ -114,7 +116,34 @@ export function isUuid(value: string): boolean {
   );
 }
 
-export function serializeMessage(message: EmailMessage) {
+export function serializeAttachment(attachment: EmailAttachment) {
+  const state = attachment.state.toLowerCase();
+  return {
+    id: attachment.id,
+    filename: attachment.filename,
+    contentType: attachment.contentType,
+    disposition: attachment.contentDisposition.toLowerCase(),
+    contentId: attachment.contentId,
+    sizeBytes: Number(attachment.sizeBytes),
+    state,
+    // Only a stored object can actually be served, so the path stays null
+    // until ingest finishes rather than handing out a link that would 409.
+    downloadPath:
+      attachment.state === 'STORED'
+        ? `/api/attachments/v2/${attachment.id}`
+        : null,
+  };
+}
+
+/**
+ * Attachment metadata is omitted entirely while the feature is disabled, so a
+ * message serialized by a deployment without attachments is byte-identical to
+ * what it was before the feature existed.
+ */
+export function serializeMessage(
+  message: EmailMessage,
+  attachments?: EmailAttachment[],
+) {
   return {
     id: message.id,
     parentMessageId: message.parentMessageId,
@@ -144,6 +173,9 @@ export function serializeMessage(message: EmailMessage) {
     text: message.textBody,
     html: message.htmlBody,
     createdAt: message.emailCreatedAt.toISOString(),
+    ...(attachmentsEnabled()
+      ? { attachments: (attachments ?? []).map(serializeAttachment) }
+      : {}),
   };
 }
 
@@ -151,6 +183,7 @@ export function serializeConversation(
   conversation: EmailConversation,
   messages: EmailMessage[],
   hasMoreBefore = false,
+  attachmentsByMessage: Map<string, EmailAttachment[]> = new Map(),
 ) {
   return {
     id: conversation.id,
@@ -178,7 +211,9 @@ export function serializeConversation(
     lastMessageAt: conversation.lastMessageAt.toISOString(),
     createdAt: conversation.createdAt.toISOString(),
     updatedAt: conversation.updatedAt.toISOString(),
-    messages: messages.map(serializeMessage),
+    messages: messages.map((message) =>
+      serializeMessage(message, attachmentsByMessage.get(message.id) ?? []),
+    ),
     page: {
       hasMoreBefore,
       before: hasMoreBefore ? (messages[0]?.id ?? null) : null,
@@ -186,7 +221,7 @@ export function serializeConversation(
   };
 }
 
-export function sendResultResponse(
+export async function sendResultResponse(
   message: EmailMessage,
   conversationId: string,
 ) {
@@ -196,7 +231,7 @@ export function sendResultResponse(
     {
       ...(failed ? { error: 'Email was not confirmed as sent' } : {}),
       conversationId,
-      message: serializeMessage(message),
+      message: await serializeMessageWithAttachments(message),
     },
     {
       status: failed ? 502 : message.state === 'PENDING' ? 202 : 200,
@@ -256,6 +291,51 @@ export async function getConversationResponse(
   const hasMoreBefore = messages.length > limit;
   const page = messages.slice(0, limit).reverse();
   return Response.json(
-    serializeConversation(conversation, page, hasMoreBefore),
+    serializeConversation(
+      conversation,
+      page,
+      hasMoreBefore,
+      await loadAttachmentsByMessage(
+        client,
+        page.map(({ id }) => id),
+      ),
+    ),
   );
+}
+
+export async function serializeMessageWithAttachments(message: EmailMessage) {
+  if (!attachmentsEnabled()) {
+    return serializeMessage(message);
+  }
+  const attachments = await getPrismaClient().emailAttachment.findMany({
+    where: { messageId: message.id },
+    orderBy: { id: 'asc' },
+  });
+  return serializeMessage(message, attachments);
+}
+
+export async function loadAttachmentsByMessage(
+  client: ReturnType<typeof getPrismaClient>,
+  messageIds: string[],
+): Promise<Map<string, EmailAttachment[]>> {
+  const grouped = new Map<string, EmailAttachment[]>();
+  if (!attachmentsEnabled() || !messageIds.length) {
+    return grouped;
+  }
+  const attachments = await client.emailAttachment.findMany({
+    where: { messageId: { in: messageIds } },
+    orderBy: { id: 'asc' },
+  });
+  for (const attachment of attachments) {
+    if (!attachment.messageId) {
+      continue;
+    }
+    const existing = grouped.get(attachment.messageId);
+    if (existing) {
+      existing.push(attachment);
+    } else {
+      grouped.set(attachment.messageId, [attachment]);
+    }
+  }
+  return grouped;
 }

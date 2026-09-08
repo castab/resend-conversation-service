@@ -2,7 +2,7 @@
   "openapi": "3.1.1",
   "info": {
     "title": "resend-conversation-service API",
-    "version": "0.7.1",
+    "version": "0.8.0",
     "description": "Receives signed Resend webhooks and provides bearer-authenticated topic-centered conversations plus synchronous and queued direct email. Conversation API v2 is the only conversation contract; conversation API v1 was retired in 0.5.0 and its paths are no longer routed. The service persists outbound intent before contacting Resend, preserves RFC reply relationships for conversations, and stores untrusted email content without retrieving attachments. The separate AsyncAPI contract for conversation lifecycle events is available from the deployed service at `/asyncapi.json`.",
     "license": {
       "name": "MIT",
@@ -44,6 +44,10 @@
     {
       "name": "Outbox",
       "description": "Asynchronous message enqueue and bounded batch delivery"
+    },
+    {
+      "name": "Attachments",
+      "description": "Attachment upload and download. Available only when the service runs with ATTACHMENTS_ENABLED=true."
     }
   ],
   "paths": {
@@ -1373,6 +1377,180 @@
           }
         }
       }
+    },
+    "/api/attachments/v2": {
+      "post": {
+        "summary": "Upload an attachment",
+        "description": "Stores raw attachment bytes and returns an identifier that a later send references. Uploading separately from the send keeps the JSON body limit on every send route unchanged. Unreferenced uploads are removed after 24 hours. Returns 404 when the service runs with attachments disabled.",
+        "operationId": "uploadAttachment",
+        "tags": ["Attachments"],
+        "parameters": [
+          {
+            "name": "x-attachment-filename",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "description": "File name including its extension. Sanitized before storage: directory components, control characters, and quotes are stripped."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "The raw attachment bytes. The request Content-Type is recorded as the attachment media type.",
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Attachment"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing filename header or empty body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Attachments are disabled on this deployment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Attachment exceeds the configured per-file limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/attachments/v2/{attachmentId}": {
+      "get": {
+        "summary": "Download an attachment",
+        "description": "Streams the stored bytes. Serving through the service keeps the same bearer credential as every other read and never exposes storage credentials or a shareable link. Serves attachments on both conversation and direct messages. Returns 404 when the service runs with attachments disabled.",
+        "operationId": "downloadAttachment",
+        "tags": ["Attachments"],
+        "parameters": [
+          {
+            "name": "attachmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The attachment bytes",
+            "headers": {
+              "Content-Disposition": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Always the attachment disposition, with an RFC 5987 filename* form carrying the exact name."
+              }
+            },
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed attachment identifier",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown attachment, or attachments are disabled on this deployment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The attachment is still being stored, or its ingest failed permanently",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Object storage could not be read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1632,7 +1810,10 @@
           "tags": {
             "$ref": "#/components/schemas/EmailTags"
           },
-          "replyToName": false
+          "replyToName": false,
+          "attachments": {
+            "$ref": "#/components/schemas/AttachmentRefList"
+          }
         },
         "anyOf": [
           {
@@ -1721,7 +1902,10 @@
           "tags": {
             "$ref": "#/components/schemas/EmailTags"
           },
-          "replyTo": false
+          "replyTo": false,
+          "attachments": {
+            "$ref": "#/components/schemas/AttachmentRefList"
+          }
         },
         "anyOf": [
           {
@@ -1843,6 +2027,14 @@
             "items": {
               "$ref": "#/components/schemas/DrainOutboxItemResult"
             }
+          },
+          "attachments": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AttachmentDrainResult"
+              }
+            ],
+            "description": "Present only when the service runs with ATTACHMENTS_ENABLED=true. Deployments with attachments disabled omit this property entirely."
           }
         }
       },
@@ -1963,6 +2155,9 @@
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "attachments": {
+            "$ref": "#/components/schemas/AttachmentList"
           }
         }
       },
@@ -2259,6 +2454,9 @@
           "resendEmailId": {
             "type": ["string", "null"],
             "description": "Provider identifier after acceptance; null while pending or when no acceptance was confirmed."
+          },
+          "attachments": {
+            "$ref": "#/components/schemas/AttachmentList"
           }
         }
       },
@@ -2644,6 +2842,136 @@
         "properties": {
           "error": {
             "type": "string"
+          }
+        }
+      },
+      "AttachmentState": {
+        "type": "string",
+        "enum": ["pending", "stored", "failed"],
+        "description": "pending means the bytes are still being copied from Resend into object storage; only a stored attachment can be downloaded. Inbound attachments start as pending because ingest is asynchronous."
+      },
+      "Attachment": {
+        "type": "object",
+        "required": [
+          "id",
+          "filename",
+          "contentType",
+          "disposition",
+          "contentId",
+          "sizeBytes",
+          "state",
+          "downloadPath"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "filename": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "contentType": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "disposition": {
+            "type": "string",
+            "enum": ["attachment", "inline"]
+          },
+          "contentId": {
+            "type": ["string", "null"],
+            "maxLength": 255,
+            "description": "Content-ID for inline parts. Inbound HTML is stored unmodified and still references these through cid: URLs; resolve them against this value."
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "state": {
+            "$ref": "#/components/schemas/AttachmentState"
+          },
+          "downloadPath": {
+            "type": ["string", "null"],
+            "description": "Service-relative path that streams the bytes. Null until the attachment reaches the stored state."
+          }
+        }
+      },
+      "AttachmentList": {
+        "type": "array",
+        "maxItems": 100,
+        "items": {
+          "$ref": "#/components/schemas/Attachment"
+        },
+        "description": "Present only when the service runs with ATTACHMENTS_ENABLED=true. Deployments with attachments disabled omit this property entirely."
+      },
+      "AttachmentRef": {
+        "type": "object",
+        "required": ["id"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Identifier returned by POST /api/attachments/v2. Each attachment may be referenced by exactly one message."
+          },
+          "contentId": {
+            "type": "string",
+            "maxLength": 255,
+            "description": "Marks the attachment inline and makes it addressable from HTML as cid:<contentId>."
+          }
+        }
+      },
+      "AttachmentRefList": {
+        "type": "array",
+        "maxItems": 100,
+        "items": {
+          "$ref": "#/components/schemas/AttachmentRef"
+        },
+        "description": "Optional. Rejected with 400 when the service runs with attachments disabled, so a caller is never told a document was sent when it was dropped."
+      },
+      "AttachmentDrainResult": {
+        "type": "object",
+        "required": [
+          "claimed",
+          "accepted",
+          "failed",
+          "retryScheduled",
+          "indeterminate",
+          "results"
+        ],
+        "description": "Outcome of the attachment outbox lane. Resend cannot send attachments through its batch endpoint, so attachment-carrying intent is queued separately and drained one message at a time through this same route.",
+        "properties": {
+          "claimed": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "accepted": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "failed": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "retryScheduled": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "indeterminate": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "results": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/DrainOutboxItemResult"
+            }
           }
         }
       }

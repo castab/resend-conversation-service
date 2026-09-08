@@ -118,6 +118,61 @@ if (drainScheduleEnabled) {
   }
 }
 
+const attachmentsEnabled = (process.env.ATTACHMENTS_ENABLED ?? '').trim();
+if (attachmentsEnabled && attachmentsEnabled.toLowerCase() !== 'true') {
+  fail('runtime_attachments_enabled_invalid');
+}
+if (attachmentsEnabled) {
+  for (const name of [
+    'ATTACHMENTS_S3_BUCKET',
+    'ATTACHMENTS_S3_REGION',
+    'ATTACHMENTS_S3_ACCESS_KEY_ID',
+    'ATTACHMENTS_S3_SECRET_ACCESS_KEY',
+  ]) {
+    if (!process.env[name]) {
+      fail('runtime_attachments_configuration_missing', { name });
+    }
+  }
+
+  const endpoint = process.env.ATTACHMENTS_S3_ENDPOINT?.trim();
+  if (endpoint) {
+    try {
+      const parsed = new URL(endpoint);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        fail('runtime_attachments_endpoint_invalid');
+      }
+    } catch {
+      fail('runtime_attachments_endpoint_invalid');
+    }
+  }
+
+  const forcePathStyle = (
+    process.env.ATTACHMENTS_S3_FORCE_PATH_STYLE ?? ''
+  ).trim();
+  if (
+    forcePathStyle &&
+    !['true', 'false'].includes(forcePathStyle.toLowerCase())
+  ) {
+    fail('runtime_attachments_force_path_style_invalid');
+  }
+
+  const bounded = [
+    ['ATTACHMENTS_MAX_BYTES', 1, 41_943_040],
+    ['ATTACHMENTS_MAX_TOTAL_BYTES', 1, 41_943_040],
+    ['ATTACHMENTS_MAX_COUNT', 1, 100],
+  ];
+  for (const [name, minimum, maximum] of bounded) {
+    const raw = (process.env[name] ?? '').trim();
+    if (!raw) {
+      continue;
+    }
+    const value = Number(raw);
+    if (!Number.isInteger(value) || value < minimum || value > maximum) {
+      fail('runtime_attachments_bound_invalid', { name });
+    }
+  }
+}
+
 if ((process.env.TELEMETRY_ENABLED ?? '').trim().toLowerCase() === 'true') {
   for (const name of [
     'OTEL_EXPORTER_OTLP_ENDPOINT',

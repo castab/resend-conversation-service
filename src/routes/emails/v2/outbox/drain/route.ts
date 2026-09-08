@@ -1,4 +1,6 @@
 import { authorizeOutboxDrain, isRecord, readJson } from '@/lib/api';
+import { drainAttachmentOutbox } from '@/lib/attachment-outbox-service';
+import { attachmentsEnabled } from '@/lib/attachments';
 import { getPrismaClient } from '@/lib/database';
 import { logEvent } from '@/lib/logger';
 import { drainEmailOutbox } from '@/lib/outbox-service';
@@ -34,10 +36,24 @@ export async function POST(request: Request) {
   }
 
   try {
+    const client = getPrismaClient();
     const startedAt = performance.now();
-    const result = await drainEmailOutbox(getPrismaClient(), limit);
+    const result = await drainEmailOutbox(client, limit);
     recordOutboxDrain((performance.now() - startedAt) / 1_000, result);
-    return Response.json(result);
+    if (!attachmentsEnabled()) {
+      return Response.json(result);
+    }
+
+    // The attachment lane is reported alongside the batch lane rather than
+    // through a second route, so existing drain clients keep their response
+    // shape and only one operation has to be scheduled.
+    const attachmentStartedAt = performance.now();
+    const attachments = await drainAttachmentOutbox(client, limit);
+    recordOutboxDrain(
+      (performance.now() - attachmentStartedAt) / 1_000,
+      attachments,
+    );
+    return Response.json({ ...result, attachments });
   } catch (error) {
     logEvent('error', 'outbox_drain_failed', {
       error_type: error instanceof Error ? error.name : 'unknown_error',
