@@ -109,13 +109,12 @@ rule is:
 | `package.json` and every other aligned file | `0.7.2-rc.1` | `validate-release-version.mjs` requires an **exact** match with the tag, minus the `v` |
 | `CHANGELOG.md` section heading | `## [0.7.2] - YYYY-MM-DD` | Names the **release**, not the candidate |
 
-**The changelog heading does not carry the `-rc.N` suffix.** A candidate is a
-candidate *for* a release and carries that release's notes, so this file has
-never held per-RC sections. `publish-rc.yml` strips the suffix before looking
-the notes up. Do not add a `## [0.7.2-rc.1]` section to make something match:
-that would duplicate the notes again for `rc.2`.
+**The changelog heading does not carry the `-rc.N` suffix.** `publish-rc.yml`
+strips the suffix and reads the section for the release the candidate is for,
+so every candidate publishes that release's notes and there is one section per
+release to maintain. Do not add a `## [0.7.2-rc.1]` section.
 
-This bit is easy to get wrong because the failure is both late and expensive.
+This is easy to get wrong because the failure is both late and expensive.
 The notes lookup runs *after* the Docker image has been pushed, so a mismatch
 leaves a published image with a red workflow and no GitHub release. It is also
 easy to mis-test: the lookup behaves differently under `gawk` and `mawk`, and

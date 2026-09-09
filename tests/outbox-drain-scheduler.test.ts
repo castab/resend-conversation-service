@@ -2,10 +2,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const outboxMocks = vi.hoisted(() => ({
   drainEmailOutbox: vi.fn(),
+  drainAttachmentOutbox: vi.fn(),
 }));
 
 vi.mock('@/lib/outbox-service', () => ({
   drainEmailOutbox: outboxMocks.drainEmailOutbox,
+}));
+
+vi.mock('@/lib/attachment-outbox-service', () => ({
+  drainAttachmentOutbox: outboxMocks.drainAttachmentOutbox,
 }));
 
 import {
@@ -22,6 +27,17 @@ function environment(overrides: Record<string, string> = {}) {
     OUTBOX_DRAIN_SCHEDULE: '*/5 * * * *',
     ...overrides,
   } as NodeJS.ProcessEnv;
+}
+
+function attachmentDrainResult(claimed: number) {
+  return {
+    claimed,
+    accepted: claimed,
+    failed: 0,
+    retryScheduled: 0,
+    indeterminate: 0,
+    results: [],
+  };
 }
 
 function drainResult(claimed: number) {
@@ -48,12 +64,21 @@ function schedule(
   };
 }
 
+const previousAttachmentsEnabled = process.env.ATTACHMENTS_ENABLED;
+
 beforeEach(() => {
   vi.clearAllMocks();
+  delete process.env.ATTACHMENTS_ENABLED;
+  outboxMocks.drainAttachmentOutbox.mockResolvedValue(attachmentDrainResult(0));
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
+  if (previousAttachmentsEnabled === undefined) {
+    delete process.env.ATTACHMENTS_ENABLED;
+  } else {
+    process.env.ATTACHMENTS_ENABLED = previousAttachmentsEnabled;
+  }
 });
 
 describe('resolveOutboxDrainSchedule', () => {
@@ -161,6 +186,38 @@ describe('runScheduledDrain', () => {
     await runScheduledDrain(client, schedule({ batchSize: 25 }));
 
     expect(outboxMocks.drainEmailOutbox).toHaveBeenCalledWith(client, 25);
+  });
+
+  it('leaves the attachment lane alone while attachments are disabled', async () => {
+    outboxMocks.drainEmailOutbox.mockResolvedValue(drainResult(0));
+
+    await runScheduledDrain(client, schedule());
+
+    expect(outboxMocks.drainAttachmentOutbox).not.toHaveBeenCalled();
+  });
+
+  it('drains both lanes on a tick while attachments are enabled', async () => {
+    process.env.ATTACHMENTS_ENABLED = 'true';
+    outboxMocks.drainEmailOutbox.mockResolvedValue(drainResult(0));
+
+    await runScheduledDrain(client, schedule({ batchSize: 25 }));
+
+    expect(outboxMocks.drainAttachmentOutbox).toHaveBeenCalledWith(client, 25);
+  });
+
+  // A full attachment lane must keep the tick going even when the batch lane
+  // is empty, or queued attachment sends would trickle out one batch per fire.
+  it('keeps draining while only the attachment lane has work', async () => {
+    process.env.ATTACHMENTS_ENABLED = 'true';
+    outboxMocks.drainEmailOutbox.mockResolvedValue(drainResult(0));
+    outboxMocks.drainAttachmentOutbox
+      .mockResolvedValueOnce(attachmentDrainResult(5))
+      .mockResolvedValueOnce(attachmentDrainResult(5))
+      .mockResolvedValueOnce(attachmentDrainResult(0));
+
+    await runScheduledDrain(client, schedule());
+
+    expect(outboxMocks.drainAttachmentOutbox).toHaveBeenCalledTimes(3);
   });
 
   it('propagates a drain failure to the caller', async () => {
