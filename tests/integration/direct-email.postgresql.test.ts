@@ -1,4 +1,5 @@
 import { FakeResendServer } from '@test-support/fake-resend-server';
+import { assertAttachmentsMode } from '@test-support/helpers/app-mode';
 import { TEST_CONFIG } from '@test-support/setup';
 import { Client } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -14,6 +15,7 @@ describe('Direct email API v2', () => {
   const webhookUrl = `${TEST_CONFIG.appBaseUrl}/api/webhooks/resend/v1`;
 
   beforeAll(async () => {
+    await assertAttachmentsMode();
     await database.connect();
     resendServer.reset();
     await resendServer.start(TEST_CONFIG.resendApiBaseUrl);

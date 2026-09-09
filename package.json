@@ -19,14 +19,14 @@
     "test": "vitest run",
     "test:unit": "vitest run tests/conversation-event-runtime.test.ts tests/logger.test.ts tests/outbox-drain-scheduler.test.ts tests/send-request-hash.test.ts tests/telemetry.test.ts",
     "test:watch": "vitest",
-    "test:postgresql": "vitest run tests/integration/webhook.postgresql.test.ts tests/integration/conversation.postgresql.test.ts tests/integration/direct-email.postgresql.test.ts",
+    "test:postgresql": "vitest run tests/integration/webhook.postgresql.test.ts tests/integration/conversation.postgresql.test.ts tests/integration/direct-email.postgresql.test.ts tests/integration/contract.postgresql.test.ts",
     "telemetry:smoke": "node scripts/telemetry-smoke.mjs",
     "db:generate": "prisma generate",
     "db:migrate:deploy": "prisma migrate deploy",
     "db:setup": "npm run db:generate && npm run db:migrate:deploy",
     "db:studio": "dotenv -e .env.test -- prisma studio",
     "db:validate": "prisma validate",
-    "test:postgresql:attachments": "vitest run tests/integration/attachments.postgresql.test.ts"
+    "test:postgresql:attachments": "vitest run tests/integration/attachments.postgresql.test.ts tests/integration/contract.postgresql.test.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1128.0",
@@ -57,6 +57,8 @@
     "@types/node": "22",
     "@types/pg": "8.11.11",
     "@types/swagger-ui-dist": "3.30.6",
+    "ajv": "8.20.0",
+    "ajv-formats": "2.1.1",
     "dotenv-cli": "11.0.0",
     "esbuild": "0.25.12",
     "tsx": "4.21.0",

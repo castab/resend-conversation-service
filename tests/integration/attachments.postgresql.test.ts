@@ -1,4 +1,5 @@
 import { FakeResendServer } from '@test-support/fake-resend-server';
+import { assertAttachmentsMode } from '@test-support/helpers/app-mode';
 import { TEST_CONFIG } from '@test-support/setup';
 import { Client } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -23,6 +24,7 @@ describe('Attachments API v2', () => {
   const PDF_BYTES = Buffer.from('%PDF-1.4 fake attachment payload', 'utf8');
 
   beforeAll(async () => {
+    await assertAttachmentsMode();
     await database.connect();
     resendServer.reset();
     await resendServer.start(TEST_CONFIG.resendApiBaseUrl);
