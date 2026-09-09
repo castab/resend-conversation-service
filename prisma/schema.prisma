@@ -67,6 +67,22 @@ enum ConversationEventSink {
   NATS
 }
 
+enum EmailAttachmentState {
+  PENDING
+  STORED
+  FAILED
+}
+
+enum EmailAttachmentSource {
+  INBOUND
+  UPLOAD
+}
+
+enum EmailAttachmentDisposition {
+  ATTACHMENT
+  INLINE
+}
+
 model EmailConversation {
   id                       String           @id @default(dbgenerated("uuidv7()")) @db.Uuid
   routingToken             String           @unique(map: "email_conversations_routing_token_key") @default(dbgenerated("gen_random_uuid()")) @map("routing_token") @db.Uuid
@@ -186,6 +202,8 @@ model EmailMessage {
   parent                      EmailMessage?       @relation("EmailMessageReplies", fields: [parentMessageId], references: [id], onDelete: SetNull)
   replies                     EmailMessage[]      @relation("EmailMessageReplies")
   outboxEntry                 EmailOutboxEntry?
+  attachmentOutboxEntry       EmailAttachmentOutboxEntry?
+  attachments                 EmailAttachment[]
 
   @@index([conversationId, emailCreatedAt, id], map: "idx_email_messages_conversation_created")
   @@index([inReplyToInternetMessageId], map: "idx_email_messages_in_reply_to")
@@ -218,6 +236,68 @@ model EmailOutboxEntry {
 
   @@unique([batchId, batchPosition], map: "email_outbox_entries_batch_position_key")
   @@map("email_outbox_entries")
+}
+
+model EmailAttachment {
+  id                 String                     @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  messageId          String?                    @map("message_id") @db.Uuid
+  source             EmailAttachmentSource
+  state              EmailAttachmentState       @default(PENDING)
+  stateDetail        String?                    @map("state_detail")
+  filename           String                     @db.VarChar(512)
+  contentType        String                     @map("content_type") @db.VarChar(255)
+  contentDisposition EmailAttachmentDisposition @default(ATTACHMENT) @map("content_disposition")
+  contentId          String?                    @map("content_id") @db.VarChar(255)
+  sizeBytes          BigInt                     @map("size_bytes")
+  checksumSha256     String?                    @map("checksum_sha256") @db.Char(64)
+  storageKey         String                     @unique(map: "email_attachments_storage_key_key") @map("storage_key") @db.VarChar(1024)
+  resendEmailId      String?                    @map("resend_email_id")
+  resendAttachmentId String?                    @map("resend_attachment_id")
+  attemptCount       Int                        @default(0) @map("attempt_count")
+  nextAttemptAt      DateTime                   @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  leaseToken         String?                    @map("lease_token") @db.Uuid
+  leaseUntil         DateTime?                  @map("lease_until") @db.Timestamptz(6)
+  lastErrorCode      String?                    @map("last_error_code") @db.VarChar(64)
+  createdAt          DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  message            EmailMessage?              @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([resendEmailId, resendAttachmentId], map: "email_attachments_resend_attachment_key")
+  @@index([messageId, id], map: "idx_email_attachments_message")
+  @@index([state, nextAttemptAt, leaseUntil, id], map: "idx_email_attachments_ready")
+  @@index([source, messageId, createdAt], map: "idx_email_attachments_unreferenced")
+  @@map("email_attachments")
+}
+
+model EmailAttachmentOutboxEntry {
+  messageId      String       @id @map("message_id") @db.Uuid
+  queuedAt       DateTime     @default(now()) @map("queued_at") @db.Timestamptz(6)
+  firstAttemptAt DateTime?    @map("first_attempt_at") @db.Timestamptz(6)
+  attemptCount   Int          @default(0) @map("attempt_count")
+  nextAttemptAt  DateTime     @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  leaseToken     String?      @map("lease_token") @db.Uuid
+  leaseUntil     DateTime?    @map("lease_until") @db.Timestamptz(6)
+  lastErrorCode  String?      @map("last_error_code") @db.VarChar(64)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  message        EmailMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([nextAttemptAt, leaseUntil, messageId], map: "idx_email_attachment_outbox_entries_ready")
+  @@map("email_attachment_outbox_entries")
+}
+
+model StoredObjectTombstone {
+  id            String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  storageKey    String    @unique(map: "stored_object_tombstones_storage_key_key") @map("storage_key") @db.VarChar(1024)
+  attemptCount  Int       @default(0) @map("attempt_count")
+  nextAttemptAt DateTime  @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  leaseToken    String?   @map("lease_token") @db.Uuid
+  leaseUntil    DateTime? @map("lease_until") @db.Timestamptz(6)
+  lastErrorCode String?   @map("last_error_code") @db.VarChar(64)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([nextAttemptAt, leaseUntil, id], map: "idx_stored_object_tombstones_ready")
+  @@map("stored_object_tombstones")
 }
 
 model EmailWebhookEvent {

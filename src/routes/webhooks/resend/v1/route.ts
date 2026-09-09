@@ -1,3 +1,4 @@
+import { wakeAttachmentIngestRuntime } from '@/lib/attachments';
 import { getPrismaClient, Prisma, type PrismaClient } from '@/lib/database';
 import type {
   ContactWebhookEvent,
@@ -132,6 +133,10 @@ async function insertEmailEvent(
       receivedEmail,
       configuredReplyTo,
     );
+    // Any attachments were recorded as PENDING inside that projection. Nudge
+    // the ingest runtime so their bytes are copied now instead of on its next
+    // poll; the webhook itself never waits for the transfer.
+    wakeAttachmentIngestRuntime();
   }
 }
 

@@ -1,4 +1,11 @@
-import { authorizeEmailV2, readJson } from '@/lib/api';
+import { authorizeEmailV2, readJson, serializeAttachment } from '@/lib/api';
+import {
+  AttachmentClaimError,
+  attachmentsEnabled,
+  claimAttachmentsForMessage,
+  listMessageAttachments,
+  outboxRelationData,
+} from '@/lib/attachments';
 import {
   deliverPendingMessage,
   recoverPendingMessage,
@@ -20,6 +27,10 @@ const IDENTITY_NOT_ALLOWED =
 
 class IdentityNotAllowedError extends Error {}
 
+function attachmentClaimResponse(error: AttachmentClaimError) {
+  return Response.json({ error: error.message }, { status: 400 });
+}
+
 function getIdempotencyKey(request: Request): string | Response {
   const key = request.headers.get('idempotency-key');
   return key && key.length <= 256
@@ -34,21 +45,28 @@ function identityNotAllowedResponse() {
   return Response.json({ error: IDENTITY_NOT_ALLOWED }, { status: 400 });
 }
 
-function serializeDirectEmail(message: EmailMessage) {
+async function serializeDirectEmail(message: EmailMessage) {
   return {
     id: message.id,
     state: message.state.toLowerCase(),
     resendEmailId: message.resendEmailId,
+    ...(attachmentsEnabled()
+      ? {
+          attachments: (
+            await listMessageAttachments(getPrismaClient(), message.id)
+          ).map(serializeAttachment),
+        }
+      : {}),
   };
 }
 
-function replayResponse(message: EmailMessage) {
+async function replayResponse(message: EmailMessage) {
   const failed =
     message.state === 'FAILED' || message.state === 'INDETERMINATE';
   return Response.json(
     {
       ...(failed ? { error: 'Email was not confirmed as sent' } : {}),
-      email: serializeDirectEmail(message),
+      email: await serializeDirectEmail(message),
     },
     { status: failed ? 502 : message.state === 'PENDING' ? 202 : 200 },
   );
@@ -124,7 +142,7 @@ export async function sendDirectEmailV2(
       ) {
         throw new IdentityNotAllowedError();
       }
-      return transaction.emailMessage.create({
+      const created = await transaction.emailMessage.create({
         data: {
           kind: 'DIRECT',
           direction: 'OUTBOUND',
@@ -142,13 +160,25 @@ export async function sendDirectEmailV2(
           emailCreatedAt: new Date(),
           idempotencyKey,
           requestHash,
-          ...(deliveryMode === 'outbox' ? { outboxEntry: { create: {} } } : {}),
+          ...outboxRelationData(
+            deliveryMode === 'outbox',
+            Boolean(validation.value.attachments?.length),
+          ),
         },
       });
+      await claimAttachmentsForMessage(
+        transaction,
+        created.id,
+        validation.value.attachments,
+      );
+      return created;
     });
   } catch (error) {
     if (error instanceof IdentityNotAllowedError) {
       return identityNotAllowedResponse();
+    }
+    if (error instanceof AttachmentClaimError) {
+      return attachmentClaimResponse(error);
     }
     if (
       !(error instanceof Prisma.PrismaClientKnownRequestError) ||
@@ -179,7 +209,7 @@ export async function sendDirectEmailV2(
   );
   if (deliveryMode === 'outbox') {
     return Response.json(
-      { email: serializeDirectEmail(message) },
+      { email: await serializeDirectEmail(message) },
       { status: 202 },
     );
   }
@@ -187,7 +217,7 @@ export async function sendDirectEmailV2(
   try {
     const sent = await deliverPendingMessage(client, message.id);
     return Response.json(
-      { email: serializeDirectEmail(sent) },
+      { email: await serializeDirectEmail(sent) },
       { status: 201 },
     );
   } catch {
@@ -198,7 +228,7 @@ export async function sendDirectEmailV2(
     return Response.json(
       {
         error: 'Failed to send email',
-        email: serializeDirectEmail(failed),
+        email: await serializeDirectEmail(failed),
       },
       { status: 502 },
     );

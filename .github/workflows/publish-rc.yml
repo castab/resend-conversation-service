@@ -89,7 +89,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           version="${RELEASE_TAG#v}"
-          awk -v version="$version" '
+          # A candidate carries the notes of the release it is a candidate for.
+          # CHANGELOG.md has never held per-RC sections, so looking up the full
+          # tag version finds nothing and fails this step after the image has
+          # already been pushed.
+          notes_version="${version%%-rc.*}"
+          awk -v version="$notes_version" '
             $0 ~ "^## \\[" version "\\]" { capture = 1; next }
             capture && /^## \[/ { exit }
             capture { print }

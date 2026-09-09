@@ -8,6 +8,10 @@ import {
   MAX_SUBJECT_LENGTH,
   MAX_TITLE_LENGTH,
 } from './api';
+import {
+  attachmentsEnabled,
+  resolveAttachmentLimits,
+} from './attachments/config';
 import { isValidReplyToBaseAddress } from './email';
 
 export type EmailIdentityInput = {
@@ -18,6 +22,11 @@ export type EmailIdentityInput = {
 export type EmailTagInput = {
   name: string;
   value: string;
+};
+
+export type EmailAttachmentRefInput = {
+  id: string;
+  contentId?: string;
 };
 
 export type CreateConversationInput = {
@@ -36,6 +45,7 @@ export type CreateConversationV2Input = Omit<
     to?: EmailIdentityInput[];
     replyTo: EmailIdentityInput;
     tags?: EmailTagInput[];
+    attachments?: EmailAttachmentRefInput[];
   };
 };
 
@@ -47,6 +57,7 @@ export type MessageV2Input = {
   to?: EmailIdentityInput[];
   replyTo: EmailIdentityInput;
   tags?: EmailTagInput[];
+  attachments?: EmailAttachmentRefInput[];
 };
 
 export type DirectEmailV2Input = {
@@ -56,9 +67,11 @@ export type DirectEmailV2Input = {
   text?: string;
   html?: string;
   tags?: EmailTagInput[];
+  attachments?: EmailAttachmentRefInput[];
 };
 
 const MAX_TAG_LENGTH = 256;
+const MAX_CONTENT_ID_LENGTH = 255;
 const MAX_RECIPIENTS = 50;
 const MAX_TAGS = 10;
 
@@ -299,6 +312,64 @@ function normalizeTags(
   return { value: tags.length ? tags : undefined };
 }
 
+/**
+ * Attachments are referenced by the IDs returned from POST /api/attachments/v2.
+ * The field is rejected outright while the feature is disabled so a caller can
+ * never believe a document was sent when it was silently dropped.
+ */
+function normalizeAttachmentRefs(
+  value: unknown,
+  field: string,
+): { value: EmailAttachmentRefInput[] | undefined } | { error: string } {
+  if (value === undefined) {
+    return { value: undefined };
+  }
+  if (!attachmentsEnabled()) {
+    return {
+      error: `${field} is not supported because attachments are disabled`,
+    };
+  }
+  if (!Array.isArray(value)) {
+    return { error: `${field} must be an array` };
+  }
+  const limits = resolveAttachmentLimits();
+  if (value.length > limits.maxCount) {
+    return {
+      error: `${field} must contain at most ${limits.maxCount} attachments`,
+    };
+  }
+  const attachments: EmailAttachmentRefInput[] = [];
+  const seen = new Set<string>();
+  for (const [index, item] of value.entries()) {
+    if (!isRecord(item) || typeof item.id !== 'string' || !isUuid(item.id)) {
+      return { error: `${field}[${index}].id must be a UUID` };
+    }
+    const id = item.id.toLowerCase();
+    if (seen.has(id)) {
+      return { error: `${field}[${index}].id is duplicated` };
+    }
+    seen.add(id);
+    if (item.contentId !== undefined) {
+      if (
+        !isHeaderSafeText(item.contentId, MAX_CONTENT_ID_LENGTH) ||
+        !item.contentId.trim() ||
+        /[s<>]/.test(item.contentId)
+      ) {
+        return {
+          error: `${field}[${index}].contentId must be a header-safe token of at most 255 characters`,
+        };
+      }
+    }
+    attachments.push({
+      id,
+      ...(typeof item.contentId === 'string'
+        ? { contentId: item.contentId.trim() }
+        : {}),
+    });
+  }
+  return { value: attachments.length ? attachments : undefined };
+}
+
 export function validateCreateV2Body(
   value: unknown,
 ): { value: CreateConversationV2Input } | { error: string } {
@@ -332,6 +403,13 @@ export function validateCreateV2Body(
   if ('error' in tags) {
     return tags;
   }
+  const attachments = normalizeAttachmentRefs(
+    value.message.attachments,
+    'message.attachments',
+  );
+  if ('error' in attachments) {
+    return attachments;
+  }
   const to =
     value.message.to === undefined
       ? undefined
@@ -351,6 +429,7 @@ export function validateCreateV2Body(
         ...(to ? { to: to.value } : {}),
         replyTo: replyTo.value,
         ...(tags.value ? { tags: tags.value } : {}),
+        ...(attachments.value ? { attachments: attachments.value } : {}),
       },
     },
   };
@@ -381,6 +460,10 @@ export function validateMessageV2Body(
   if ('error' in tags) {
     return tags;
   }
+  const attachments = normalizeAttachmentRefs(value.attachments, 'attachments');
+  if ('error' in attachments) {
+    return attachments;
+  }
   const to =
     value.to === undefined
       ? undefined
@@ -399,6 +482,7 @@ export function validateMessageV2Body(
       ...(to ? { to: to.value } : {}),
       replyTo: replyTo.value,
       ...(tags.value ? { tags: tags.value } : {}),
+      ...(attachments.value ? { attachments: attachments.value } : {}),
     },
   };
 }
@@ -424,6 +508,10 @@ export function validateDirectEmailV2Body(
   const tags = normalizeTags(value.tags, 'tags');
   if ('error' in tags) {
     return tags;
+  }
+  const attachments = normalizeAttachmentRefs(value.attachments, 'attachments');
+  if ('error' in attachments) {
+    return attachments;
   }
   if (
     !isHeaderSafeText(value.subject, MAX_SUBJECT_LENGTH) ||
@@ -467,6 +555,7 @@ export function validateDirectEmailV2Body(
       ...(text ? { text } : {}),
       ...(html ? { html } : {}),
       ...(tags.value ? { tags: tags.value } : {}),
+      ...(attachments.value ? { attachments: attachments.value } : {}),
     },
   };
 }

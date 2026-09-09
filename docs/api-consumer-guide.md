@@ -1,6 +1,6 @@
 # API Consumer Guide
 
-Contract version: `0.7.1`
+Contract version: `0.7.2-rc.1`
 
 ## Service purpose
 
@@ -125,6 +125,8 @@ When a `V1`-tagged conversation is promoted, its existing persisted Reply-To bas
 | `POST` | `/api/emails/v2` | Synchronously send one email without a conversation or Reply-To header | `201`, replay `200`/`202` | `400`, `401`, `409`, `413`, `415`, `500`, `502` |
 | `POST` | `/api/emails/v2/outbox` | Persist and enqueue direct email without a conversation | `202`, replay `200`/`202` | `400`, `401`, `409`, `413`, `415`, `500`, `502` |
 | `POST` | `/api/emails/v2/outbox/drain` | Deliver one shared direct/conversation outbox batch | `200` | `400`, `401`, `413`, `415`, `500` |
+| `POST` | `/api/attachments/v2` | Upload attachment bytes and receive a reference ID | `201` | `400`, `401`, `404`, `413`, `500` |
+| `GET` | `/api/attachments/v2/{attachmentId}` | Stream a stored attachment | `200` | `400`, `401`, `404`, `409`, `500`, `502` |
 | `POST` | `/api/conversations/v2` | Create and synchronously send an opening message | `201`, replay `200`/`202` | `400`, `401`, `409`, `413`, `415`, `500`, `502` |
 | `GET` | `/api/conversations/v2?assignment=unassigned` | List unassigned inbound conversations | `200` | `400`, `401`, `500` |
 | `GET` | `/api/conversations/v2/summary` | Count conversations per state and list those in the selected states | `200` | `400`, `401`, `500` |
@@ -137,7 +139,7 @@ When a `V1`-tagged conversation is promoted, its existing persisted Reply-To bas
 | `POST` | `/api/conversations/v2/{conversationId}/messages/outbox` | Persist and enqueue a reply | `202`, replay `200`/`202` | `400`, `401`, `404`, `409`, `413`, `415`, `500`, `502`, `503` |
 | `GET` | `/api/conversations/v2/topics/{topicType}/{externalTopicId}` | Read by external topic | `200` | `400`, `401`, `404`, `500` |
 
-All authenticated direct-email and conversation V2 routes use `EMAIL_v2_API_KEY`. `/api/health/v2` is unauthenticated. Drain uses only `OUTBOX_DRAIN_API_KEY`.
+All authenticated direct-email, attachment, and conversation V2 routes use `EMAIL_v2_API_KEY`. `/api/health/v2` is unauthenticated. Drain uses only `OUTBOX_DRAIN_API_KEY`. The attachment routes exist only when the deployment sets `ATTACHMENTS_ENABLED=true`; otherwise they return the terminal `404`.
 
 ## Direct email workflow
 
@@ -326,6 +328,75 @@ Summary items carry conversation metadata only. There is deliberately no message
 Clear a conversation that needs no follow-up, such as a bare acknowledgement, with `POST /api/conversations/v2/{conversationId}/state` and body `{"state":"concluded"}`. Every state is settable and every transition is permitted, including reopening a `terminated` conversation. Setting the state a conversation already holds succeeds and leaves the state value unchanged, but currently resets `stateChangedAt`. No email is sent, so this route takes no `Idempotency-Key`.
 
 State transitions are driven by mail flow rather than by the route that triggered them, so they apply equally to conversations created before the V1 retirement.
+
+## Attachments
+
+Attachments are an opt-in deployment feature. When the service runs without
+`ATTACHMENTS_ENABLED`, no response carries an `attachments` property, the
+attachment routes return `404`, and a send body containing `attachments` is
+rejected with `400` rather than sent without them. Detect support by calling
+`POST /api/attachments/v2`: a `404` means the feature is off.
+
+**Sending.** Upload first, reference second. `POST /api/attachments/v2` takes the
+raw bytes as the request body, an `x-attachment-filename` header, and the
+attachment media type as the request `Content-Type`. It returns an object whose
+`id` you pass in the send body:
+
+```json
+{ "attachments": [{ "id": "0199...", "contentId": "logo" }] }
+```
+
+`contentId` is optional; supplying it marks the part inline and makes it
+addressable from your HTML as `cid:logo`. Each uploaded attachment may be
+claimed by exactly one message. Referencing an unknown, already-used, or
+not-yet-stored ID fails the whole send with `400` before any provider call, so
+a partially-attached email is never delivered. Uploads that are never referenced
+are deleted after 24 hours.
+
+Send limits default to 25 MiB per attachment and 28 MiB per message, chosen so a
+message stays under the provider's 40 MB ceiling once attachments are base64
+encoded. Deployments may configure lower values.
+
+**Receiving.** Inbound attachments are stored asynchronously: the provider's
+download links expire, so the service copies the bytes into its own storage in
+the background. A newly received attachment therefore reports
+`"state": "pending"` with a `null` `downloadPath`, and becomes `"stored"` once
+the copy completes. Poll the conversation, or consume the
+`conversation.message.received` event, whose optional `attachmentCount` tells
+you how many to expect. An attachment that permanently fails ingest reports
+`"state": "failed"`.
+
+Inbound HTML is stored exactly as received, so inline images still reference
+`cid:` URLs. Resolve them against each attachment's `contentId`.
+
+**Reading.** Each message carries an `attachments` array:
+
+```json
+{
+  "id": "0199...",
+  "filename": "invoice.pdf",
+  "contentType": "application/pdf",
+  "disposition": "attachment",
+  "contentId": null,
+  "sizeBytes": 20416,
+  "state": "stored",
+  "downloadPath": "/api/attachments/v2/0199..."
+}
+```
+
+`GET` the `downloadPath` with the same bearer credential to stream the bytes.
+It returns `409` while the attachment is still `pending`. Filenames originate
+with remote senders; they are stripped of directory components and control
+characters, but treat them as untrusted display text.
+
+**Queued sends.** Attachments cannot ride the provider's batch endpoint, so
+queued sends that carry them use a separate lane. Both lanes are drained by the
+same `POST /api/emails/v2/outbox/drain` call, and the attachment lane's outcome
+appears in an additional `attachments` object on the drain result alongside the
+unchanged top-level fields.
+
+**Lifetime.** Stored objects are tied to the message that owns them. Deleting a
+conversation removes its attachments and their stored objects.
 
 ## Retired conversation API V1
 
@@ -594,12 +665,16 @@ curl -i \
 - Current conversation API: V2. Conversation API V1 was retired in 0.5.0 and its paths return `404`.
 - OpenAPI version: `3.1.1`.
 - AsyncAPI version: `3.1.0`; conversation event payload schema version: `1`.
-- Contract/package version observed in repository: `0.7.1`.
+- Contract/package version observed in repository: `0.7.2-rc.1`.
+- Attachments are an opt-in deployment feature gated by `ATTACHMENTS_ENABLED`. With it disabled, responses are identical to 0.7.1 and the attachment routes return `404`. Consumers must not assume the `attachments` property exists.
+- Inbound attachment bytes are stored asynchronously, so an attachment can be visible as `pending` before it is downloadable. There is no callback for the transition; poll the conversation.
+- Attachment ingest has a bounded retry ladder and then marks an attachment `failed` permanently. There is no automatic re-ingest afterwards, and the provider's copy may have expired by then.
+- Queued sends carrying attachments are sent one at a time rather than batched, so their throughput is lower than the batch lane.
 - No browser-safe authentication or correlation/request ID is defined.
 - Gateway exposure policy is deployment-owned and not included in this contract.
 - Topic lookup does not enforce the documented 255-character `externalTopicId` limit although create and assignment do; consumers must follow the stricter contract.
 - Runtime webhook family validation accepts signed `email.*`, `contact.*`, and `domain.*` types when their payload can be projected, while the OpenAPI event enums remain the strict supported contract. Consumers should send only documented Resend event types.
-- Health readiness requires `DATABASE_URL`, `RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET`, a valid `RESEND_REPLY_TO` base, an EMAIL V2 credential, `OUTBOX_DRAIN_API_KEY`, and PostgreSQL connectivity. When `CONVERSATION_EVENTS_SINKS=NATS`, the configured NATS stream and subject must also be valid and a persistent publication failure makes readiness return `503` until recovery.
+- Health readiness requires `DATABASE_URL`, `RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET`, a valid `RESEND_REPLY_TO` base, an EMAIL V2 credential, `OUTBOX_DRAIN_API_KEY`, and PostgreSQL connectivity. When `CONVERSATION_EVENTS_SINKS=NATS`, the configured NATS stream and subject must also be valid and a persistent publication failure makes readiness return `503` until recovery. When `ATTACHMENTS_ENABLED=true`, storage credentials must be present and the bucket must be reachable at startup, and a persistently failing attachment ingest cycle makes readiness return `503` until recovery.
 - Runtime accepts trimmed, case-insensitive state values for the manual state route; use the lowercase OpenAPI enum values as the supported contract.
 - Current runtime and OpenAPI reset `stateChangedAt` after every successful manual state write, including a repeated value. This conflicts with the service lifecycle invariant that the timestamp should change only with the state value; avoid no-op state writes and do not depend on the reset while the discrepancy remains unresolved.
 - Conversation send validators may ignore an explicitly empty `text` or `html` when the other body format is nonempty. The strict contract requires every supplied body field to be nonempty.

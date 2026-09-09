@@ -56,7 +56,18 @@ Run `npm run release:validate` before opening or merging a release PR.
    npm run api:validate
    npm run lint
    npm run build
+   npm run test:unit
    npm run test:postgresql
+   ```
+
+   `npm run test:postgresql` runs against an application started without
+   `ATTACHMENTS_ENABLED` and asserts that attachments stay invisible in that
+   mode. Cover the enabled path too, against a second application process with
+   the flag on and the Compose MinIO service running:
+
+   ```bash
+   docker compose up -d postgresql minio minio-init
+   npm run test:postgresql:attachments
    ```
 
 4. Open a pull request into `main` with the version and changelog updates.
@@ -70,11 +81,10 @@ Run `npm run release:validate` before opening or merging a release PR.
    git push origin v0.0.1
    ```
 
-6. For a release candidate, use a version such as `0.7.0-rc.1` and tag it as
-   `v0.7.0-rc.1`. The RC workflow publishes only the exact Docker tag
-   `castab/resend-conversation-service:0.7.0-rc.1` and creates a GitHub
-   prerelease; it does not move `latest` or any stable aliases. Increment the
-   RC number for subsequent candidates.
+6. For a release candidate, follow [Release candidates](#release-candidates)
+   below. The RC workflow publishes only the exact Docker tag
+   `castab/resend-conversation-service:0.7.2-rc.1` and creates a GitHub
+   prerelease; it does not move `latest` or any stable aliases.
 
 7. The stable tag-triggered publish workflow builds and pushes these Docker tags to
    Docker Hub for stable releases:
@@ -86,6 +96,49 @@ Run `npm run release:validate` before opening or merging a release PR.
 
 8. After Docker publication succeeds, create a GitHub Release from the matching
    `CHANGELOG.md` section and include the published image digest.
+
+## Release candidates
+
+Two version strings are in play for a candidate, and they are deliberately not
+the same. Getting them backwards is the most common way an RC fails, so the
+rule is:
+
+| Where | Value for the first candidate of 0.7.2 | Why |
+| --- | --- | --- |
+| Git tag | `v0.7.2-rc.1` | Identifies this exact candidate |
+| `package.json` and every other aligned file | `0.7.2-rc.1` | `validate-release-version.mjs` requires an **exact** match with the tag, minus the `v` |
+| `CHANGELOG.md` section heading | `## [0.7.2] - YYYY-MM-DD` | Names the **release**, not the candidate |
+
+**The changelog heading does not carry the `-rc.N` suffix.** A candidate is a
+candidate *for* a release and carries that release's notes, so this file has
+never held per-RC sections. `publish-rc.yml` strips the suffix before looking
+the notes up. Do not add a `## [0.7.2-rc.1]` section to make something match:
+that would duplicate the notes again for `rc.2`.
+
+This bit is easy to get wrong because the failure is both late and expensive.
+The notes lookup runs *after* the Docker image has been pushed, so a mismatch
+leaves a published image with a red workflow and no GitHub release. It is also
+easy to mis-test: the lookup behaves differently under `gawk` and `mawk`, and
+the CI runner uses `mawk`. Check it the way the runner will:
+
+```bash
+docker run --rm -v "$PWD":/w -w /w ubuntu:24.04 bash -c '
+  version=0.7.2-rc.1
+  awk -v version="${version%%-rc.*}" '"'"'
+    $0 ~ "^## \\[" version "\\]" { capture = 1; next }
+    capture && /^## \[/ { exit }
+    capture { print }
+  '"'"' CHANGELOG.md | wc -c'
+```
+
+A nonzero byte count means the prerelease step will find its notes. On Git Bash
+for Windows, prefix the command with `MSYS_NO_PATHCONV=1` and use `$(pwd -W)`
+so the bind mount path is not rewritten.
+
+Increment only the RC number for subsequent candidates, so `0.7.2-rc.2` keeps
+pointing at the same `## [0.7.2]` section. When the release goes stable, drop
+the suffix from the aligned files; the changelog heading is already correct and
+does not change.
 
 ## Docker repository migration
 

@@ -1,5 +1,9 @@
 export type {
   ConversationState,
+  EmailAttachment,
+  EmailAttachmentDisposition,
+  EmailAttachmentSource,
+  EmailAttachmentState,
   EmailConversation,
   EmailMessage,
   EmailWebhookEvent,

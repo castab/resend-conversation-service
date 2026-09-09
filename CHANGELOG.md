@@ -8,6 +8,87 @@ and this project uses [Semantic Versioning](https://semver.org/). See
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-09-08
+
+### Added
+
+- Added optional support for receiving and sending email attachments, stored in
+  S3-compatible object storage and tracked in PostgreSQL. The whole feature sits
+  behind `ATTACHMENTS_ENABLED` and is off by default.
+- Added `POST /api/attachments/v2` to upload raw attachment bytes and
+  `GET /api/attachments/v2/{attachmentId}` to stream them back, both under
+  `EMAIL_v2_API_KEY`. Uploading separately from the send keeps the JSON body
+  limit on every existing route unchanged. Downloads stream through the service,
+  so storage credentials and pre-signed links are never exposed to callers.
+- Added an optional `attachments` array to send bodies
+  (`[{ id, contentId? }]`), referencing prior uploads. An attachment can be
+  claimed by exactly one message, atomically with the send intent.
+- Added an `attachments` array to serialized messages and to the direct email
+  response, carrying filename, media type, disposition, content ID, size, state,
+  and a download path.
+- Added asynchronous inbound attachment ingest. The webhook projects attachment
+  metadata inside its existing transaction, and a background runtime with
+  per-row leases and retry backoff copies the bytes into object storage. An
+  attachment therefore reports `pending` until its bytes are stored.
+- Added a separate outbox lane for attachment-carrying intent, drained through
+  the existing `POST /api/emails/v2/outbox/drain` route and reported as an
+  additive `attachments` object on its result. Resend cannot send attachments
+  through its batch endpoint, so that lane sends one message at a time.
+- Added lifecycle-tied deletion. A `BEFORE DELETE` trigger on
+  `email_attachments` records every removed row's object as a tombstone, and a
+  reaper deletes it from storage with retries. Deleting a conversation cascades
+  inside PostgreSQL, so the trigger is what guarantees its objects are removed.
+  Uploads never referenced by a send are collected after 24 hours.
+- Added an optional `attachmentCount` to the `conversation.message.received`
+  event. The event schema version stays `1`.
+
+### Changed
+
+- `POST /api/emails/v2/outbox/drain` now also drains the attachment lane and
+  returns an additional `attachments` object when attachments are enabled. All
+  existing top-level fields keep their exact meaning, and the property is absent
+  when the feature is disabled.
+- The built-in drain scheduler now drains both lanes per tick.
+- `GET /api/health/v2` now also reports unhealthy when attachments are enabled
+  but storage is unconfigured or the ingest runtime is failing. With the feature
+  disabled the check is unchanged.
+- Attachment filenames, storage keys, and download URLs are redacted from logs
+  alongside the existing email fields.
+- CI now runs the unit suites, which it previously never did, via a new
+  `npm run test:unit` script.
+
+### Upgrade notes
+
+- Request hashing is unchanged for every request shape that existed at 0.7.1.
+  `attachments` enters the hashed value only when a caller supplies it, so
+  idempotency records written before the upgrade still match on retry, whether
+  or not the feature is enabled. `tests/send-request-hash.test.ts` pins the
+  released hashes against regression.
+- **No action is required to upgrade.** `ATTACHMENTS_ENABLED` defaults to off,
+  and with it off every response is byte-identical to 0.7.1: no `attachments`
+  property is added anywhere, the new routes fall through to the terminal
+  `404`, and no new configuration is read.
+- The migration is additive. It creates `email_attachments`,
+  `email_attachment_outbox_entries`, and `stored_object_tombstones`, three
+  enums, and one trigger function. No existing table or column is altered.
+- To enable the feature, set `ATTACHMENTS_ENABLED=true` and provide
+  `ATTACHMENTS_S3_BUCKET`, `ATTACHMENTS_S3_REGION`,
+  `ATTACHMENTS_S3_ACCESS_KEY_ID`, and `ATTACHMENTS_S3_SECRET_ACCESS_KEY`.
+  Non-AWS storage also needs `ATTACHMENTS_S3_ENDPOINT` and usually
+  `ATTACHMENTS_S3_FORCE_PATH_STYLE=true`. The service refuses to start if the
+  flag is on and the bucket cannot be reached; it never creates the bucket.
+- Size limits default to 25 MiB per attachment and 28 MiB per message, which
+  keeps a message under Resend's 40 MB ceiling once attachments are base64
+  encoded. Override with `ATTACHMENTS_MAX_BYTES`,
+  `ATTACHMENTS_MAX_TOTAL_BYTES`, and `ATTACHMENTS_MAX_COUNT`.
+- Once enabled, a send body carrying `attachments` is accepted; while disabled
+  the same body is rejected with `400` rather than silently sent without them.
+- Queued sends with attachments are not batched. If you rely on the drain
+  response, read the new `attachments` object to see that lane's outcome.
+- Grant the service `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject`, and
+  `s3:ListBucket` on the bucket. Deletion is driven by the service, so a bucket
+  lifecycle rule is not required.
+
 ## [0.7.1] - 2026-09-02
 
 ### Added

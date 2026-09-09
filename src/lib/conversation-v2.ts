@@ -3,8 +3,13 @@ import {
   isUuid,
   readJson,
   sendResultResponse,
-  serializeMessage,
+  serializeMessageWithAttachments,
 } from '@/lib/api';
+import {
+  AttachmentClaimError,
+  claimAttachmentsForMessage,
+  outboxRelationData,
+} from '@/lib/attachments';
 import { appendConversationEvent } from '@/lib/conversation-events';
 import {
   deliverPendingMessage,
@@ -40,6 +45,10 @@ const IDENTITY_NOT_ALLOWED =
   'The requested email identity is not allowed. Contact the administrator.';
 
 class IdentityNotAllowedError extends Error {}
+
+function attachmentClaimResponse(error: AttachmentClaimError) {
+  return Response.json({ error: error.message }, { status: 400 });
+}
 
 function identityNotAllowedResponse() {
   return Response.json({ error: IDENTITY_NOT_ALLOWED }, { status: 400 });
@@ -160,6 +169,11 @@ export async function createConversationV2(request: Request, queued: boolean) {
         },
         include: { messages: true },
       });
+      await claimAttachmentsForMessage(
+        transaction,
+        conversation.messages[0].id,
+        validation.value.message.attachments,
+      );
       await appendConversationEvent(transaction, {
         conversationId: conversation.id,
         type: 'CREATED',
@@ -184,6 +198,9 @@ export async function createConversationV2(request: Request, queued: boolean) {
   } catch (error) {
     if (error instanceof IdentityNotAllowedError) {
       return identityNotAllowedResponse();
+    }
+    if (error instanceof AttachmentClaimError) {
+      return attachmentClaimResponse(error);
     }
     if (
       !(error instanceof Prisma.PrismaClientKnownRequestError) ||
@@ -229,6 +246,9 @@ export async function createConversationV2(request: Request, queued: boolean) {
     } catch (reopenError) {
       if (reopenError instanceof IdentityNotAllowedError) {
         return identityNotAllowedResponse();
+      }
+      if (reopenError instanceof AttachmentClaimError) {
+        return attachmentClaimResponse(reopenError);
       }
       if (
         reopenError instanceof Prisma.PrismaClientKnownRequestError &&
@@ -297,7 +317,7 @@ function messageCreateData(
     emailCreatedAt: now,
     idempotencyKey,
     requestHash,
-    ...(queued ? { outboxEntry: { create: {} } } : {}),
+    ...outboxRelationData(queued, Boolean(value.message.attachments?.length)),
   };
 }
 
@@ -383,6 +403,11 @@ async function reopenFailedConversation(
         ),
       },
     });
+    await claimAttachmentsForMessage(
+      transaction,
+      message.id,
+      input.value.message.attachments,
+    );
     await appendConversationEvent(transaction, {
       conversationId: conversation.id,
       type: 'MESSAGE_OUTBOUND_INTENDED',
@@ -555,6 +580,11 @@ export async function createMessageV2(
           queued,
         ),
       });
+      await claimAttachmentsForMessage(
+        transaction,
+        message.id,
+        validation.value.attachments,
+      );
       await transaction.emailConversation.update({
         where: { id: conversationId },
         data: {
@@ -601,6 +631,9 @@ export async function createMessageV2(
     if (error instanceof IdentityNotAllowedError) {
       return identityNotAllowedResponse();
     }
+    if (error instanceof AttachmentClaimError) {
+      return attachmentClaimResponse(error);
+    }
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === 'P2002'
@@ -629,7 +662,10 @@ export async function createMessageV2(
   recordEmailIntent('conversation', queued ? 'outbox' : 'synchronous');
   return queued
     ? Response.json(
-        { conversationId, message: serializeMessage(pending) },
+        {
+          conversationId,
+          message: await serializeMessageWithAttachments(pending),
+        },
         { status: 202 },
       )
     : deliverResponse(client, conversationId, pending.id, 'conversation reply');
@@ -676,7 +712,7 @@ function replyCreateData(
     emailCreatedAt: now,
     idempotencyKey,
     requestHash,
-    ...(queued ? { outboxEntry: { create: {} } } : {}),
+    ...outboxRelationData(queued, Boolean(value.attachments?.length)),
   };
 }
 
@@ -689,7 +725,7 @@ async function queuedResponse(
     where: { id: messageId },
   });
   return Response.json(
-    { conversationId, message: serializeMessage(message) },
+    { conversationId, message: await serializeMessageWithAttachments(message) },
     { status: 202 },
   );
 }
@@ -703,7 +739,10 @@ async function deliverResponse(
   try {
     const message = await deliverPendingMessage(client, messageId);
     return Response.json(
-      { conversationId, message: serializeMessage(message) },
+      {
+        conversationId,
+        message: await serializeMessageWithAttachments(message),
+      },
       { status: 201 },
     );
   } catch (error) {
@@ -718,7 +757,7 @@ async function deliverResponse(
       {
         error: 'Failed to send email',
         conversationId,
-        message: serializeMessage(message),
+        message: await serializeMessageWithAttachments(message),
       },
       { status: 502 },
     );

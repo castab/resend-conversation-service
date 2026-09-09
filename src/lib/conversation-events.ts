@@ -35,6 +35,7 @@ export interface ConversationEventPayload {
   state?: { from: string | null; to: string };
   deliveryState?: string;
   mergedIntoConversationId?: string;
+  attachmentCount?: number;
 }
 
 export function getEnabledConversationEventSinks(
@@ -75,6 +76,7 @@ export async function appendConversationEvent(
     state?: { from: string | null; to: string };
     deliveryState?: string;
     mergedIntoConversationId?: string;
+    attachmentCount?: number;
   },
 ): Promise<ConversationEventPayload | null> {
   const sinks = getEnabledConversationEventSinks();
@@ -122,6 +124,9 @@ export async function appendConversationEvent(
     ...(input.deliveryState ? { deliveryState: input.deliveryState } : {}),
     ...(input.mergedIntoConversationId
       ? { mergedIntoConversationId: input.mergedIntoConversationId }
+      : {}),
+    ...(input.attachmentCount
+      ? { attachmentCount: input.attachmentCount }
       : {}),
   };
   await client.conversationEvent.update({

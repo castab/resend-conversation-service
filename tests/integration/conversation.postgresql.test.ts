@@ -1582,6 +1582,23 @@ describe('Private conversation API', () => {
     }
   });
 
+  // With the attachments flag off, serialized messages must be byte-identical
+  // to what they were before the feature existed.
+  it('omits attachment metadata entirely while the flag is off', async () => {
+    const created = await createConversation('attachments-flag-off');
+    expect(created.response.status).toBe(201);
+    expect(Object.hasOwn(created.body.message, 'attachments')).toBe(false);
+
+    const read = await fetch(`${baseUrl}/${created.body.conversationId}`, {
+      headers: { authorization: `Bearer ${TEST_CONFIG.emailV2ApiKey}` },
+    });
+    expect(read.status).toBe(200);
+    const conversation = await read.json();
+    for (const message of conversation.messages) {
+      expect(Object.hasOwn(message, 'attachments')).toBe(false);
+    }
+  });
+
   async function postWebhook(event: unknown) {
     const signed = signPayload(
       TEST_CONFIG.webhookSecret,

@@ -1,4 +1,6 @@
 import { Cron } from 'croner';
+import { drainAttachmentOutbox } from '@/lib/attachment-outbox-service';
+import { attachmentsEnabled } from '@/lib/attachments';
 import type { PrismaClient } from '@/lib/database';
 import { logEvent } from '@/lib/logger';
 import { drainEmailOutbox } from '@/lib/outbox-service';
@@ -82,11 +84,27 @@ export async function runScheduledDrain(
   const startedAt = performance.now();
   let outcome: 'success' | 'failure' = 'failure';
   try {
+    const drainAttachments = attachmentsEnabled();
     for (let batch = 0; batch < schedule.maxBatches; batch += 1) {
       const drainStartedAt = performance.now();
       const result = await drainEmailOutbox(client, schedule.batchSize);
       recordOutboxDrain((performance.now() - drainStartedAt) / 1_000, result);
-      if (result.claimed === 0) {
+
+      let attachmentClaimed = 0;
+      if (drainAttachments) {
+        const attachmentStartedAt = performance.now();
+        const attachments = await drainAttachmentOutbox(
+          client,
+          schedule.batchSize,
+        );
+        recordOutboxDrain(
+          (performance.now() - attachmentStartedAt) / 1_000,
+          attachments,
+        );
+        attachmentClaimed = attachments.claimed;
+      }
+
+      if (result.claimed === 0 && attachmentClaimed === 0) {
         outcome = 'success';
         return;
       }
