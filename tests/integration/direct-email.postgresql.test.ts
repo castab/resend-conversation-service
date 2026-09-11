@@ -573,6 +573,15 @@ describe('Direct email API v2', () => {
     );
     expect(download.status).toBe(404);
 
+    const downloadUrl = await fetch(
+      `${TEST_CONFIG.appBaseUrl}/api/attachments/v2/00000000-0000-7000-8000-00000000beef/download-url`,
+      {
+        method: 'POST',
+        headers: { authorization: `Bearer ${TEST_CONFIG.emailV2ApiKey}` },
+      },
+    );
+    expect(downloadUrl.status).toBe(404);
+
     const withAttachments = await send('flag-off-attachments', {
       attachments: [{ id: '00000000-0000-7000-8000-00000000beef' }],
     });

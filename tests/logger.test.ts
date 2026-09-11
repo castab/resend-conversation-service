@@ -16,6 +16,12 @@ describe('structured logger', () => {
           route: '/api/health/v2',
           email: 'participant@example.com',
           subject: 'sensitive subject',
+          downloadUrl:
+            'http://storage.example/bucket/key?X-Amz-Signature=secret',
+          attachment: {
+            downloadUrl:
+              'http://storage.example/bucket/key?X-Amz-Signature=nested-secret',
+          },
         },
         'http_request_completed',
       );
@@ -31,5 +37,8 @@ describe('structured logger', () => {
     );
     expect(record).not.toHaveProperty('email');
     expect(record).not.toHaveProperty('subject');
+    expect(record).not.toHaveProperty('downloadUrl');
+    expect(record.attachment).not.toHaveProperty('downloadUrl');
+    expect(lines.join('')).not.toContain('X-Amz-Signature');
   });
 });

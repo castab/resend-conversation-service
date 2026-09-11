@@ -8,6 +8,14 @@ and this project uses [Semantic Versioning](https://semver.org/). See
 
 ## [Unreleased]
 
+### Added
+
+- Added `POST /api/attachments/v2/{attachmentId}/download-url`, authenticated
+  with `EMAIL_v2_API_KEY`, to issue a short-lived S3-compatible download
+  capability for a stored attachment. The existing streaming download and
+  stable `downloadPath` remain unchanged. URLs default to five minutes, are
+  capped at 15 minutes, and are never persisted or logged.
+
 ## [0.7.2] - 2026-09-08
 
 ### Added

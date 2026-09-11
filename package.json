@@ -1,6 +1,6 @@
 {
   "name": "resend-conversation-service",
-  "version": "0.7.2-rc.1",
+  "version": "0.7.2-rc.2",
   "private": true,
   "packageManager": "npm@11.18.0",
   "engines": {
@@ -17,7 +17,7 @@
     "lint:fix": "biome check . --write",
     "lint": "biome check .",
     "test": "vitest run",
-    "test:unit": "vitest run tests/conversation-event-runtime.test.ts tests/logger.test.ts tests/outbox-drain-scheduler.test.ts tests/send-request-hash.test.ts tests/telemetry.test.ts",
+    "test:unit": "vitest run tests/attachment-config.test.ts tests/conversation-event-runtime.test.ts tests/logger.test.ts tests/outbox-drain-scheduler.test.ts tests/send-request-hash.test.ts tests/telemetry.test.ts",
     "test:watch": "vitest",
     "test:postgresql": "vitest run tests/integration/webhook.postgresql.test.ts tests/integration/conversation.postgresql.test.ts tests/integration/direct-email.postgresql.test.ts tests/integration/contract.postgresql.test.ts",
     "telemetry:smoke": "node scripts/telemetry-smoke.mjs",
@@ -30,6 +30,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1128.0",
+    "@aws-sdk/s3-request-presigner": "3.1128.0",
     "@opentelemetry/api": "1.9.1",
     "@opentelemetry/api-logs": "0.222.0",
     "@opentelemetry/exporter-logs-otlp-proto": "0.222.0",

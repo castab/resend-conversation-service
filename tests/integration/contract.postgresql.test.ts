@@ -152,6 +152,18 @@ describe('OpenAPI conformance', () => {
       const attachment = (await uploaded.json()) as { id: string };
       conform('Attachment', attachment);
 
+      const issued = await fetch(
+        `${TEST_CONFIG.appBaseUrl}/api/attachments/v2/${attachment.id}/download-url`,
+        {
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${TEST_CONFIG.emailV2ApiKey}`,
+          },
+        },
+      );
+      expect(issued.status).toBe(200);
+      conform('AttachmentDownloadUrl', await issued.json());
+
       const sent = await post(
         '/api/emails/v2',
         `contract-attach-${Date.now()}`,

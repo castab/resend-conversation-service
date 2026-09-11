@@ -14,6 +14,7 @@ import {
   attachmentsEnabled,
   getConfiguredAttachmentStorage,
   resolveAttachmentLimits,
+  resolveAttachmentPresignedUrlTtlSeconds,
   startAttachmentIngestRuntime,
   startAttachmentReaperRuntime,
   stopAttachmentIngestRuntime,
@@ -39,6 +40,7 @@ import {
   recordHttpRequest,
   registerDatabaseGauges,
 } from '@/lib/telemetry-metrics';
+import { POST as createAttachmentDownloadUrlV2 } from '@/routes/attachments/v2/[attachmentId]/download-url/route';
 import { GET as downloadAttachmentV2 } from '@/routes/attachments/v2/[attachmentId]/route';
 import { POST as uploadAttachmentV2 } from '@/routes/attachments/v2/route';
 import { POST as enqueueMessageV2 } from '@/routes/conversations/v2/[conversationId]/messages/outbox/route';
@@ -253,6 +255,11 @@ export function createApp() {
       requireEmailV2Auth,
       adaptStream(downloadAttachmentV2),
     );
+    app.post(
+      '/api/attachments/v2/:attachmentId/download-url',
+      requireEmailV2Auth,
+      adapt(createAttachmentDownloadUrlV2),
+    );
   }
 
   // Static conversation routes must precede /:conversationId routes.
@@ -393,6 +400,7 @@ async function startServer() {
     if (attachmentsEnabled()) {
       // Fail fast on unusable storage rather than accepting mail the service
       // cannot durably keep, mirroring the conversation event stream check.
+      resolveAttachmentPresignedUrlTtlSeconds();
       await getConfiguredAttachmentStorage().headBucket();
       logEvent('info', 'attachment_storage_verified');
     }

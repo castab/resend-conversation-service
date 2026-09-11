@@ -1,6 +1,6 @@
 # API Agent Handoff
 
-Contract version: `0.7.2-rc.1`
+Contract version: `0.7.2-rc.2`
 
 ## Sources
 
@@ -77,6 +77,7 @@ The complete application-operation layout:
 | `POST` | `/api/emails/v2/outbox/drain` | Drain one shared direct/conversation batch at the only drain route, plus the attachment lane when attachments are enabled |
 | `POST` | `/api/attachments/v2` | Upload attachment bytes; returns the ID a send references. Only when `ATTACHMENTS_ENABLED=true` |
 | `GET` | `/api/attachments/v2/{attachmentId}` | Stream a stored attachment. Only when `ATTACHMENTS_ENABLED=true` |
+| `POST` | `/api/attachments/v2/{attachmentId}/download-url` | Issue a short-lived direct-storage download capability. Only when `ATTACHMENTS_ENABLED=true` |
 | `POST`, `GET` | `/api/conversations/v2` | Create/send; list unassigned with `assignment=unassigned` |
 | `GET` | `/api/conversations/v2/summary` | Counts per conversation state plus a filterable page of conversation metadata |
 | `POST` | `/api/conversations/v2/outbox` | Enqueue opening message; pending idempotent replay also returns `202` |
@@ -149,7 +150,10 @@ rejected with `400`. Probe support with `POST /api/attachments/v2`.
   `state: "pending"` with a `null` `downloadPath` until the copy completes;
   they then become `"stored"`, or `"failed"` if ingest gives up.
   `conversation.message.received` may carry `attachmentCount`.
-- Download with the same bearer credential. `409` means still pending.
+- The stable `downloadPath` streams through the service with the same bearer
+  credential. The authenticated download-URL operation may instead issue a
+  five-minute direct-storage bearer capability, configurable only from 1 to 900
+  seconds. Never persist or log it. `409` means pending or failed.
 - Queued sends with attachments use a separate lane that cannot be batched. It
   drains through the same route and reports into an additive `attachments`
   object on the drain result.
@@ -212,9 +216,9 @@ Conversations created before the V1 retirement are still stored with `apiVersion
 8. Schedule the shared drain with the dedicated credential at `/api/emails/v2/outbox/drain`. It is the only drain route. The service may instead be configured to run that drain on its own internal cron schedule, which is disabled by default and does not change this contract.
 9. Sanitize response HTML.
 10. Validate request and response models against upstream OpenAPI contract
-    `0.7.2-rc.1`.
+    `0.7.2-rc.2`.
 11. If consuming conversation events, generate or validate handlers against
-    AsyncAPI contract `0.7.2-rc.1`, reject unsupported payload schema versions,
+    AsyncAPI contract `0.7.2-rc.2`, reject unsupported payload schema versions,
     and persist event IDs for deduplication.
 
 ## Known concerns
