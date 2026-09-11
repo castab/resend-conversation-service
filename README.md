@@ -63,6 +63,7 @@ POST  /api/emails/v2/outbox
 POST  /api/emails/v2/outbox/drain
 POST  /api/attachments/v2
 GET   /api/attachments/v2/{attachmentId}
+POST  /api/attachments/v2/{attachmentId}/download-url
 POST  /api/conversations/v2
 GET   /api/conversations/v2?assignment=unassigned
 GET   /api/conversations/v2/summary
@@ -286,7 +287,11 @@ ATTACHMENTS_S3_KEY_PREFIX=
 ATTACHMENTS_MAX_BYTES=26214400
 ATTACHMENTS_MAX_TOTAL_BYTES=29360128
 ATTACHMENTS_MAX_COUNT=20
+ATTACHMENTS_PRESIGNED_URL_TTL_SECONDS=300
 ```
+
+The presigned URL lifetime must be an integer from 1 through 900 seconds and
+defaults to 300. Invalid values fail startup. Keep the bucket private.
 
 The service needs `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject`, and
 `s3:ListBucket` on the bucket.
@@ -316,10 +321,19 @@ until its bytes are stored, and its `downloadPath` is `null` until then.
 Inbound HTML is stored unmodified, so inline images still reference `cid:` URLs;
 resolve them against each attachment's `contentId`.
 
-**Reading.** Messages gain an `attachments` array. Fetch the bytes from
-`GET /api/attachments/v2/{attachmentId}` with the same bearer credential; the
-service streams from storage, so the bucket and its credentials are never
-exposed to callers.
+**Reading.** Messages gain an `attachments` array whose stable `downloadPath`
+continues to point at `GET /api/attachments/v2/{attachmentId}`. Send the same
+bearer credential to stream through the service.
+
+For a short-lived direct-storage capability, send an authenticated
+`POST /api/attachments/v2/{attachmentId}/download-url`. The response contains
+`downloadUrl` and `expiresAt` and is marked `private, no-store`. The URL itself
+is a bearer capability and needs no service credential when fetched; do not log
+or persist it. A custom `ATTACHMENTS_S3_ENDPOINT` must be reachable by the API
+consumer, because it becomes the URL origin. Bucket, key, endpoint, and the
+non-secret access-key identifier are necessarily encoded in a direct SigV4 URL
+but are never returned as separate fields; the secret access key is never
+exposed.
 
 **Deletion.** Object lifetime is tied to the message that owns it. Deleting a
 conversation cascades to its attachment rows inside PostgreSQL, and a database

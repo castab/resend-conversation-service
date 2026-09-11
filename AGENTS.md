@@ -124,8 +124,11 @@
 - Keep the `email_attachments` delete trigger. Conversation deletes cascade
   inside PostgreSQL, so the trigger is the only thing that observes every delete
   path and records the stored object for removal.
-- Serve downloads through the service under `EMAIL_v2_API_KEY`. Do not hand out
-  pre-signed URLs or expose the bucket, endpoint, or credentials to callers.
+- Keep the stable streaming download under `EMAIL_v2_API_KEY`. Short-lived
+  pre-signed URLs may be issued only by the dedicated authenticated operation,
+  must expire within 15 minutes, and must never be persisted or logged. Do not
+  expose storage configuration separately from the capability URL or expose
+  secret credentials at all.
 - Treat filenames as untrusted remote input. Strip directory components and
   control characters before storing or returning them.
 

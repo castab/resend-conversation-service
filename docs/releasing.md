@@ -82,8 +82,8 @@ Run `npm run release:validate` before opening or merging a release PR.
    ```
 
 6. For a release candidate, follow [Release candidates](#release-candidates)
-   below. The RC workflow publishes only the exact Docker tag
-   `castab/resend-conversation-service:0.7.2-rc.1` and creates a GitHub
+   below. The RC workflow publishes only the exact candidate Docker tag, such
+   as `castab/resend-conversation-service:0.7.2-rc.2`, and creates a GitHub
    prerelease; it does not move `latest` or any stable aliases.
 
 7. The stable tag-triggered publish workflow builds and pushes these Docker tags to

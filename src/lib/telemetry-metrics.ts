@@ -117,7 +117,8 @@ export type ProviderOperation =
   | 'storage_put'
   | 'storage_get'
   | 'storage_delete'
-  | 'storage_head_bucket';
+  | 'storage_head_bucket'
+  | 'storage_head_object';
 
 export function recordProviderRequest(
   durationSeconds: number,

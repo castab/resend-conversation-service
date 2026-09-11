@@ -3,9 +3,11 @@ import {
   DeleteObjectCommand,
   GetObjectCommand,
   HeadBucketCommand,
+  HeadObjectCommand,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import {
   type ProviderOperation,
   recordProviderRequest,
@@ -35,6 +37,16 @@ export interface AttachmentStorage {
   put(key: string, body: Buffer, contentType: string): Promise<void>;
   get(key: string): Promise<{ body: Readable; contentLength: number | null }>;
   getBuffer(key: string): Promise<Buffer>;
+  head(key: string): Promise<void>;
+  presignGet(
+    key: string,
+    options: {
+      contentType: string;
+      contentDisposition: string;
+      expiresInSeconds: number;
+      signingDate: Date;
+    },
+  ): Promise<string>;
   delete(key: string): Promise<void>;
   headBucket(): Promise<void>;
 }
@@ -128,6 +140,30 @@ export function createAttachmentStorage(
         chunks.push(Buffer.from(chunk));
       }
       return Buffer.concat(chunks);
+    },
+    async head(key) {
+      await run('storage_head_object', (abortSignal) =>
+        client.send(
+          new HeadObjectCommand({ Bucket: config.bucket, Key: key }),
+          { abortSignal },
+        ),
+      );
+    },
+    presignGet(key, options) {
+      return getSignedUrl(
+        client,
+        new GetObjectCommand({
+          Bucket: config.bucket,
+          Key: key,
+          ResponseCacheControl: 'private, no-store',
+          ResponseContentDisposition: options.contentDisposition,
+          ResponseContentType: options.contentType,
+        }),
+        {
+          expiresIn: options.expiresInSeconds,
+          signingDate: options.signingDate,
+        },
+      );
     },
     async delete(key) {
       await run('storage_delete', (abortSignal) =>

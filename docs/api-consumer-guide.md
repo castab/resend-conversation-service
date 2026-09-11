@@ -1,6 +1,6 @@
 # API Consumer Guide
 
-Contract version: `0.7.2-rc.1`
+Contract version: `0.7.2-rc.2`
 
 ## Service purpose
 
@@ -16,7 +16,10 @@ The service is authoritative for:
 - Idempotent synchronous and queued direct-email acceptance without conversation threading
 - Signed Resend webhook ingestion and inbound projection
 
-The service does not provide browser authentication, contact management, attachment retrieval, allowlist administration, or a general engagement analytics API. Returned HTML is untrusted and must be sanitized before browser rendering.
+The service does not provide browser authentication, contact management,
+allowlist administration, or a general engagement analytics API. It provides
+authenticated attachment retrieval and short-lived download capabilities.
+Returned HTML is untrusted and must be sanitized before browser rendering.
 
 ## Version choice
 
@@ -127,6 +130,7 @@ When a `V1`-tagged conversation is promoted, its existing persisted Reply-To bas
 | `POST` | `/api/emails/v2/outbox/drain` | Deliver one shared direct/conversation outbox batch | `200` | `400`, `401`, `413`, `415`, `500` |
 | `POST` | `/api/attachments/v2` | Upload attachment bytes and receive a reference ID | `201` | `400`, `401`, `404`, `413`, `500` |
 | `GET` | `/api/attachments/v2/{attachmentId}` | Stream a stored attachment | `200` | `400`, `401`, `404`, `409`, `500`, `502` |
+| `POST` | `/api/attachments/v2/{attachmentId}/download-url` | Issue a short-lived direct-storage download capability | `200` | `400`, `401`, `404`, `409`, `500`, `502` |
 | `POST` | `/api/conversations/v2` | Create and synchronously send an opening message | `201`, replay `200`/`202` | `400`, `401`, `409`, `413`, `415`, `500`, `502` |
 | `GET` | `/api/conversations/v2?assignment=unassigned` | List unassigned inbound conversations | `200` | `400`, `401`, `500` |
 | `GET` | `/api/conversations/v2/summary` | Count conversations per state and list those in the selected states | `200` | `400`, `401`, `500` |
@@ -384,10 +388,29 @@ Inbound HTML is stored exactly as received, so inline images still reference
 }
 ```
 
-`GET` the `downloadPath` with the same bearer credential to stream the bytes.
-It returns `409` while the attachment is still `pending`. Filenames originate
-with remote senders; they are stripped of directory components and control
-characters, but treat them as untrusted display text.
+`GET` the stable `downloadPath` with the same bearer credential to stream the
+bytes through the service. It returns `409` while the attachment is still
+`pending`. Filenames originate with remote senders; they are stripped of
+directory components and control characters, but treat them as untrusted
+display text.
+
+To download directly from storage, authenticate a
+`POST /api/attachments/v2/{attachmentId}/download-url`. Only a `stored`
+attachment whose object still exists can receive a URL. The response is:
+
+```json
+{
+  "downloadUrl": "https://storage.example/…",
+  "expiresAt": "2026-09-11T18:05:00.000Z"
+}
+```
+
+The response is `private, no-store`. `downloadUrl` is a bearer capability: it
+can be fetched without `EMAIL_v2_API_KEY`, remains usable until it expires or
+the object is removed, and must not be persisted or logged. The default lifetime
+is five minutes and deployments cannot configure more than 15 minutes. Request
+a new URL after expiry. Pending and failed attachments return `409`; unknown
+attachments and missing storage objects return `404`.
 
 **Queued sends.** Attachments cannot ride the provider's batch endpoint, so
 queued sends that carry them use a separate lane. Both lanes are drained by the
@@ -665,7 +688,7 @@ curl -i \
 - Current conversation API: V2. Conversation API V1 was retired in 0.5.0 and its paths return `404`.
 - OpenAPI version: `3.1.1`.
 - AsyncAPI version: `3.1.0`; conversation event payload schema version: `1`.
-- Contract/package version observed in repository: `0.7.2-rc.1`.
+- Contract/package version observed in repository: `0.7.2-rc.2`.
 - Attachments are an opt-in deployment feature gated by `ATTACHMENTS_ENABLED`. With it disabled, responses are identical to 0.7.1 and the attachment routes return `404`. Consumers must not assume the `attachments` property exists.
 - Inbound attachment bytes are stored asynchronously, so an attachment can be visible as `pending` before it is downloadable. There is no callback for the transition; poll the conversation.
 - Attachment ingest has a bounded retry ladder and then marks an attachment `failed` permanently. There is no automatic re-ingest afterwards, and the provider's copy may have expired by then.

@@ -1,6 +1,8 @@
 export const DEFAULT_MAX_ATTACHMENT_BYTES = 26_214_400;
 export const DEFAULT_MAX_TOTAL_ATTACHMENT_BYTES = 29_360_128;
 export const DEFAULT_MAX_ATTACHMENT_COUNT = 20;
+export const DEFAULT_PRESIGNED_URL_TTL_SECONDS = 300;
+export const MAX_PRESIGNED_URL_TTL_SECONDS = 900;
 
 export interface AttachmentStorageConfig {
   bucket: string;
@@ -43,6 +45,27 @@ export function resolveAttachmentLimits(
       DEFAULT_MAX_ATTACHMENT_COUNT,
     ),
   };
+}
+
+export function resolveAttachmentPresignedUrlTtlSeconds(
+  environment: NodeJS.ProcessEnv = process.env,
+): number {
+  const raw = environment.ATTACHMENTS_PRESIGNED_URL_TTL_SECONDS?.trim();
+  if (!raw) {
+    return DEFAULT_PRESIGNED_URL_TTL_SECONDS;
+  }
+
+  const parsed = Number(raw);
+  if (
+    !Number.isInteger(parsed) ||
+    parsed < 1 ||
+    parsed > MAX_PRESIGNED_URL_TTL_SECONDS
+  ) {
+    throw new Error(
+      `ATTACHMENTS_PRESIGNED_URL_TTL_SECONDS must be an integer between 1 and ${MAX_PRESIGNED_URL_TTL_SECONDS}`,
+    );
+  }
+  return parsed;
 }
 
 export function resolveAttachmentStorageConfig(

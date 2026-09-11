@@ -1,11 +1,12 @@
 import { Readable } from 'node:stream';
-import { authorizeEmailV2, isUuid } from '@/lib/api';
+import { authorizeEmailV2 } from '@/lib/api';
 import {
   AttachmentStorageError,
   attachmentsEnabled,
+  buildContentDisposition,
   getConfiguredAttachmentStorage,
+  resolveStoredAttachment,
 } from '@/lib/attachments';
-import { getPrismaClient } from '@/lib/database';
 import { logEvent } from '@/lib/logger';
 
 /**
@@ -26,29 +27,11 @@ export async function GET(
   }
 
   const { attachmentId: rawAttachmentId } = await context.params;
-  if (!isUuid(rawAttachmentId)) {
-    return Response.json({ error: 'Invalid attachment ID' }, { status: 400 });
+  const resolved = await resolveStoredAttachment(rawAttachmentId);
+  if ('response' in resolved) {
+    return resolved.response;
   }
-  const attachmentId = rawAttachmentId.toLowerCase();
-
-  const attachment = await getPrismaClient().emailAttachment.findUnique({
-    where: { id: attachmentId },
-  });
-  if (!attachment) {
-    return Response.json({ error: 'Attachment not found' }, { status: 404 });
-  }
-  if (attachment.state !== 'STORED') {
-    return Response.json(
-      {
-        error:
-          attachment.state === 'PENDING'
-            ? 'Attachment is still being stored'
-            : 'Attachment could not be stored',
-        state: attachment.state.toLowerCase(),
-      },
-      { status: 409 },
-    );
-  }
+  const { attachment } = resolved;
 
   try {
     const object = await getConfiguredAttachmentStorage().get(
@@ -81,16 +64,4 @@ export async function GET(
       { status: 502 },
     );
   }
-}
-
-/**
- * Filenames come from remote senders. The ASCII fallback is stripped to a
- * quote-free, control-free token and the exact name is carried in the RFC 5987
- * form so a hostile name cannot inject header syntax.
- */
-export function buildContentDisposition(filename: string): string {
-  const ascii = filename.replace(/[^\x20-\x7e]/g, '_').replaceAll('"', '');
-  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(
-    filename,
-  )}`;
 }

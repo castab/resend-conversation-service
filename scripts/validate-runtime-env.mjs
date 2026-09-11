@@ -160,6 +160,7 @@ if (attachmentsEnabled) {
     ['ATTACHMENTS_MAX_BYTES', 1, 41_943_040],
     ['ATTACHMENTS_MAX_TOTAL_BYTES', 1, 41_943_040],
     ['ATTACHMENTS_MAX_COUNT', 1, 100],
+    ['ATTACHMENTS_PRESIGNED_URL_TTL_SECONDS', 1, 900],
   ];
   for (const [name, minimum, maximum] of bounded) {
     const raw = (process.env[name] ?? '').trim();

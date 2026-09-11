@@ -100,6 +100,40 @@ describe('Attachments API v2', () => {
     );
     const body = Buffer.from(await download.arrayBuffer());
     expect(body.equals(PDF_BYTES)).toBe(true);
+
+    const issued = await createDownloadUrl(String(attachment.id));
+    expect(issued.status).toBe(200);
+    expect(issued.headers.get('cache-control')).toBe('private, no-store');
+    const capability = (await issued.json()) as {
+      downloadUrl: string;
+      expiresAt: string;
+    };
+    const presignedUrl = new URL(capability.downloadUrl);
+    expect(presignedUrl.origin).toBe(
+      process.env.ATTACHMENTS_S3_ENDPOINT ?? 'http://localhost:9000',
+    );
+    expect(presignedUrl.pathname).toMatch(/^\/resend-attachments\/[0-9a-f-]+$/);
+    expect(presignedUrl.searchParams.get('X-Amz-Algorithm')).toBe(
+      'AWS4-HMAC-SHA256',
+    );
+    expect(presignedUrl.searchParams.get('X-Amz-Expires')).toBe('300');
+    expect(presignedUrl.searchParams.get('X-Amz-Signature')).toMatch(
+      /^[0-9a-f]{64}$/,
+    );
+    expect(
+      new Date(capability.expiresAt).getTime() -
+        parseAmzDate(presignedUrl.searchParams.get('X-Amz-Date')).getTime(),
+    ).toBe(300_000);
+
+    const directDownload = await fetch(capability.downloadUrl);
+    expect(directDownload.status).toBe(200);
+    expect(directDownload.headers.get('content-type')).toBe('application/pdf');
+    expect(directDownload.headers.get('content-disposition')).toContain(
+      'filename="report.pdf"',
+    );
+    expect(
+      Buffer.from(await directDownload.arrayBuffer()).equals(PDF_BYTES),
+    ).toBe(true);
   });
 
   it('requires authentication to download and 404s unknown attachments', async () => {
@@ -108,6 +142,12 @@ describe('Attachments API v2', () => {
 
     const unauthenticated = await fetch(`${attachmentsUrl}/${id}`);
     expect(unauthenticated.status).toBe(401);
+
+    const unauthenticatedUrl = await fetch(
+      `${attachmentsUrl}/${id}/download-url`,
+      { method: 'POST' },
+    );
+    expect(unauthenticatedUrl.status).toBe(401);
 
     const missing = await fetch(
       `${attachmentsUrl}/00000000-0000-7000-8000-00000000dead`,
@@ -119,6 +159,42 @@ describe('Attachments API v2', () => {
       headers: { authorization: `Bearer ${TEST_CONFIG.emailV2ApiKey}` },
     });
     expect(invalid.status).toBe(400);
+
+    const invalidUrl = await createDownloadUrl('not-a-uuid');
+    expect(invalidUrl.status).toBe(400);
+
+    const missingUrl = await createDownloadUrl(
+      '00000000-0000-7000-8000-00000000dead',
+    );
+    expect(missingUrl.status).toBe(404);
+  });
+
+  it('rejects pending, failed, and missing stored objects', async () => {
+    const pending = await insertAttachment('PENDING', 'pending-object');
+    const pendingResponse = await createDownloadUrl(pending);
+    expect(pendingResponse.status).toBe(409);
+    await expect(pendingResponse.json()).resolves.toEqual({
+      error: 'Attachment is still being stored',
+      state: 'pending',
+    });
+
+    const failed = await insertAttachment('FAILED', 'failed-object');
+    const failedResponse = await createDownloadUrl(failed);
+    expect(failedResponse.status).toBe(409);
+    await expect(failedResponse.json()).resolves.toEqual({
+      error: 'Attachment could not be stored',
+      state: 'failed',
+    });
+
+    const missingObject = await insertAttachment(
+      'STORED',
+      `missing-${Date.now()}`,
+    );
+    const missingObjectResponse = await createDownloadUrl(missingObject);
+    expect(missingObjectResponse.status).toBe(404);
+    await expect(missingObjectResponse.json()).resolves.toEqual({
+      error: 'Attachment not found',
+    });
   });
 
   it('sanitizes a hostile filename before storing it', async () => {
@@ -343,7 +419,7 @@ describe('Attachments API v2', () => {
     expect(attachment.attempt_count).toBeGreaterThan(1);
   });
 
-  it('tombstones stored objects when a conversation is deleted', async () => {
+  it('tombstones stored objects and revokes issued URLs after object deletion', async () => {
     resendServer.addReceivedAttachment(
       'em_received123',
       {
@@ -360,6 +436,11 @@ describe('Attachments API v2', () => {
       'SELECT id FROM email_conversations LIMIT 1',
     );
     const conversationId = conversations.rows[0].id as string;
+
+    const issued = await createDownloadUrl(stored.id);
+    expect(issued.status).toBe(200);
+    const { downloadUrl } = (await issued.json()) as { downloadUrl: string };
+    expect((await fetch(downloadUrl)).status).toBe(200);
 
     const deleted = await fetch(`${conversationsUrl}/${conversationId}`, {
       method: 'DELETE',
@@ -380,7 +461,15 @@ describe('Attachments API v2', () => {
       [stored.storage_key],
     );
     expect(tombstones.rows[0].count).toBe(1);
-  });
+
+    const deadline = Date.now() + 35_000;
+    let capabilityStatus = 200;
+    while (Date.now() < deadline && capabilityStatus === 200) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      capabilityStatus = (await fetch(downloadUrl)).status;
+    }
+    expect(capabilityStatus).toBe(404);
+  }, 45_000);
 
   async function deliverReceivedWebhook(svixId = generateSvixId()) {
     const signed = signPayload(
@@ -450,6 +539,28 @@ describe('Attachments API v2', () => {
     });
   }
 
+  function createDownloadUrl(attachmentId: string) {
+    return fetch(`${attachmentsUrl}/${attachmentId}/download-url`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${TEST_CONFIG.emailV2ApiKey}` },
+    });
+  }
+
+  async function insertAttachment(
+    state: 'PENDING' | 'STORED' | 'FAILED',
+    storageKey: string,
+  ) {
+    const result = await database.query(
+      `INSERT INTO email_attachments
+        (source, state, filename, content_type, size_bytes, storage_key, updated_at)
+       VALUES ('INBOUND', $1::"EmailAttachmentState", 'fixture.bin',
+         'application/octet-stream', 1, $2, now())
+       RETURNING id`,
+      [state, storageKey],
+    );
+    return result.rows[0].id as string;
+  }
+
   function sendDirect(idempotencyKey: string, attachmentId: string) {
     return fetch(emailsUrl, {
       method: 'POST',
@@ -464,3 +575,12 @@ describe('Attachments API v2', () => {
     });
   }
 });
+
+function parseAmzDate(value: string | null): Date {
+  if (!value || !/^\d{8}T\d{6}Z$/.test(value)) {
+    throw new Error('Presigned URL is missing a valid X-Amz-Date');
+  }
+  return new Date(
+    `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}T${value.slice(9, 11)}:${value.slice(11, 13)}:${value.slice(13, 15)}Z`,
+  );
+}
